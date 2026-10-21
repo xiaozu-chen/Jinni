@@ -1,37 +1,24 @@
+import json
 import sys
-from pathlib import Path
+
+from openai import OpenAI
+
+from config import (
+    BASE_URL, MODEL, SYSTEM_PROMPT, MAX_STEPS,
+    CONTEXT_LIMIT, COMPACT_AT, SUMMARIZE_AT, KEEP_TURNS,
+    MEMORY_FILE, GRAY, RESET,
+)
+from context import compact, to_transcript
+from tools import TOOL_FUNCTIONS, TOOL_SCHEMAS, NEEDS_APPROVAL
 
 sys.stdout.reconfigure(encoding="utf-8")
 sys.stdin.reconfigure(encoding="utf-8")
 
-from openai import OpenAI
-
-import json
-
-from tools import TOOL_FUNCTIONS, TOOL_SCHEMAS, NEEDS_APPROVAL
-
-client = OpenAI(base_url="http://localhost:8080/v1", api_key="not-needed")
-
-SYSTEM_PROMPT = "You are Jinni, a helpful local AI agent. Keep answers concise."
-
-MAX_STEPS = 8
-
-CONTEX_LIMIT = 16384
-COMPACT_AT = 0.7
-KEEP_RECENT = 3
-
-SUMMARIZE_AT = 0.8
-KEEP_TURNS = 2
-summary = ""
-
-MEMORY_FILE = Path("memory.txt")
-
-SHOW_THINKING = True
-GRAY = "\033[90m"
-RESET = "\033[0m"
+client = OpenAI(base_url=BASE_URL, api_key="not-needed")
 
 messages = [{"role": "system", "content": SYSTEM_PROMPT}]
-
+summary = ""
+SHOW_THINKING = True
 
 def run_tool(call):
     name = call["name"]
@@ -47,34 +34,8 @@ def run_tool(call):
         return str(TOOL_FUNCTIONS[name](**args))
     except Exception as e:
         return f"Error: {e}"
+
         
-
-def compact(messages):
-    tool_idxs = [i for i, m in enumerate(messages) if m["role"] == "tool"]
-    old = tool_idxs[:-KEEP_RECENT]
-    shrunk = 0
-    for i in old:
-        text = messages[i]["content"]
-        if len(text) > 200:
-            messages[i]["content"] = text[:150] + " ...[trimmed to save context]"
-            shrunk += 1
-    return shrunk
-
-def to_transcript(msgs):
-    lines = []
-    for m in msgs:
-        if m["role"] == "user":
-            lines.append(f"User: {m['content']}")
-        elif m["role"] == "assistant":
-            if m.get("content"):
-                lines.append(f" Jinni: {m['content']}")
-            for tc in m.get("tool_calls", []):
-                f = tc["function"]
-                lines.append(f"Jinni used {f['name']}({f['arguments'][:200]})")
-        elif m["role"] == "tool":
-            lines.append(f"Tool result: {m['content'][:300]}")
-    return "\n".join(lines)
-
 def apply_memory():
     text = SYSTEM_PROMPT
     if summary:
@@ -191,12 +152,12 @@ def chat(user_text):
     for step in range(MAX_STEPS):
         content, calls, used = stream_response()
 
-        print(f"  (context: {used}/{CONTEX_LIMIT})")
-        if used > CONTEX_LIMIT * COMPACT_AT:
+        print(f"  (context: {used}/{CONTEXT_LIMIT})")
+        if used > CONTEXT_LIMIT * COMPACT_AT:
             n = compact(messages)
             if n:
                 print(f"  (compacted {n} old tool results)")
-        if used > CONTEX_LIMIT * SUMMARIZE_AT:
+        if used > CONTEXT_LIMIT * SUMMARIZE_AT:
             summarize_history()
 
         if not calls:
