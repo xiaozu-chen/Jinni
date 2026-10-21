@@ -19,6 +19,10 @@ CONTEX_LIMIT = 2000
 COMPACT_AT = 0.7
 KEEP_RECENT = 3
 
+SUMMARIZE_AT = 0.8
+KEEP_TURNS = 2
+summary = ""
+
 messages = [{"role": "system", "content": SYSTEM_PROMPT}]
 
 
@@ -32,7 +36,7 @@ def run_tool(tc):
         if name in NEEDS_APPROVAL:
             answer = input(f"  allow {name}? (y/n) >").strip().lower()
             if answer != "y":
-                return "Error: the user denied this action."
+                return "The user declined this action. It was their choice, not a technical error. Do not retry; ask what they want instead."
         return str(TOOL_FUNCTIONS[name](**args))
     except Exception as e:
         return f"Error: {e}"
@@ -49,6 +53,52 @@ def compact(messages):
             shrunk += 1
     return shrunk
 
+def to_transcript(msgs):
+    lines = []
+    for m in msgs:
+        if m["role"] == "user":
+            lines.append(f"User: {m['content']}")
+        elif m["role"] == "assistant":
+            if m.get("content"):
+                lines.append(f" Jinni: {m['content']}")
+            for tc in m.get("tool_calls", []):
+                f = tc["function"]
+                lines.append(f"Jinni used {f['name']}({f['arguments'][:200]})")
+        elif m["role"] == "tool":
+            lines.append(f"Tool result: {m['content'][:300]}")
+    return "\n".join(lines)
+
+def summarize_history():
+    global summary
+    user_idxs = [i for i, m in enumerate(messages) if m["role"] == "user"]
+    if len(user_idxs) <= KEEP_TURNS:
+        return False
+
+    cut = user_idxs[-KEEP_TURNS]
+    old = messages[1:cut]
+
+    prompt = (
+        "/no_think\n"
+        "Summarize this conversation as notes for your own memory."
+        "Keep: the user's name and goals, exact file names read or written,"
+        "decisions made, and anything unfinished. Drop small talk. "
+        "Under 150 words, bullet points.\n\n"
+    )
+    if summary:
+        prompt += f"Previous notes:\n{summary}\n\n"
+    prompt += "New conversation:\n" + to_transcript(old)
+
+    response = client.chat.completions.create(
+        model="qwen3",
+        messages=[{"role": "user", "content": prompt}],
+    )
+    summary = response.choices[0].message.content.strip()
+
+    messages[0]["content"] = SYSTEM_PROMPT + "\n\nYour memory of earlier conversation:\n" + summary
+    del messages[1:cut]
+    print(f"  (summarized {len(old)} messages into notes)")
+    print(f"  notes: {summary}")
+    return True
 
 def chat(user_text):
     messages.append({"role": "user", "content": user_text})
@@ -68,6 +118,9 @@ def chat(user_text):
             n = compact(messages)
             if n:
                 print(f"  (compacted {n} old tool results)")
+
+        if used > CONTEX_LIMIT * SUMMARIZE_AT:
+            summarize_history()                
 
         if not msg.tool_calls:
             print(msg.content)
