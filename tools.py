@@ -19,12 +19,16 @@ def list_files(path="."):
     try:
         folder = safe_path(path)
         return "\n".join(item.name for item in folder.iterdir()) or "(empty folder)"
+    except FileNotFoundError:
+        return f"Error: '{path}' was not found in the workspace."
     except Exception as e:
         return f"Error: {e}"
 
 def read_file(path):
     try:
         return safe_path(path).read_text(encoding="utf-8")[:MAX_READ]
+    except FileNotFoundError:
+        return f"Error: '{path}' was not found in the workspace."
     except Exception as e:
         return f"Error: {e}"
 
