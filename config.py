@@ -20,4 +20,4 @@ MEMORY_FILE = Path("memory.txt")
 
 # terminal colors
 GRAY = "\033[90m"
-RESEST = "\033[0m"
+RESET = "\033[0m"
