@@ -26,10 +26,10 @@ summary = ""
 messages = [{"role": "system", "content": SYSTEM_PROMPT}]
 
 
-def run_tool(tc):
-    name = tc.function.name
+def run_tool(call):
+    name = call["name"]
     try:
-        args = json.loads(tc.function.arguments or "{}")
+        args = json.loads(call["arguments"] or "{}")
         print(f"  [tool] {name}({args})")
         if name not in TOOL_FUNCTIONS:
             return f"Error: unknown tool '{name}'"
@@ -102,54 +102,88 @@ def summarize_history():
     print(f"  notes: {summary}")
     return True
 
+def stream_response():
+    stream = client.chat.completions.create(
+        model="qwen3",
+        messages=messages,
+        tools=TOOL_SCHEMAS,
+        stream=True,
+        stream_options={"include_usage": True}
+    )
+
+    content = ""
+    calls = {}
+    used = 0
+
+    for chunk in stream:
+        if chunk.usage:
+            used = chunk.usage.prompt_tokens
+        if not chunk.choices:
+            continue
+
+        delta = chunk.choices[0].delta
+
+        if delta.content:
+            print(delta.content, end="", flush=True)
+            content += delta.content
+
+        for tc in delta.tool_calls or []:
+            slot = calls.setdefault(tc.index, {"id": "", "name": "", "arguments": ""})
+            if tc.id:
+                slot["id"] = tc.id
+            if tc.function:
+                if tc.function.name:
+                    slot["name"] += tc.function.name
+                if tc.function.arguments:
+                    slot["arguments"] += tc.function.arguments
+
+    if content:
+            print()
+
+    tool_calls = []
+    for i in sorted(calls):
+        c = calls[i]
+        c["id"] = c["id"] or f"call_{i}"
+        tool_calls.append(c)
+    
+    return content, tool_calls, used
+
 def chat(user_text):
     messages.append({"role": "user", "content": user_text})
 
     for step in range(MAX_STEPS):
-        print(f"  (step {step + 1})")
-        response = client.chat.completions.create(
-            model="qwen3",
-            messages=messages,
-            tools=TOOL_SCHEMAS,
-        )
-        msg = response.choices[0].message
+        content, calls, used = stream_response()
 
-        used = response.usage.prompt_tokens
-        print(f" (context: {used}/{CONTEX_LIMIT})")
+        print(f"  (content: {used}/{CONTEX_LIMIT})")
         if used > CONTEX_LIMIT * COMPACT_AT:
             n = compact(messages)
             if n:
                 print(f"  (compacted {n} old tool results)")
-
         if used > CONTEX_LIMIT * SUMMARIZE_AT:
-            summarize_history()                
+            summarize_history()
 
-        if not msg.tool_calls:
-            print(msg.content)
-            messages.append({"role": "assistant", "content": msg.content or ""})
+        if not calls:
+            messages.append({"role": "assistant", "content": content})
             return
 
         messages.append({
             "role": "assistant",
-            "content": msg.content or "",
+            "content": content,
             "tool_calls": [
                 {
-                    "id": tc.id,
+                    "id": c["id"],
                     "type": "function",
-                    "function": {
-                        "name": tc.function.name,
-                        "arguments": tc.function.arguments,
-                    },
+                    "function": {"name": c["name"], "arguments": c["arguments"]},
                 }
-                for tc in msg.tool_calls
+                for c in calls
             ],
         })
 
-        for tc in msg.tool_calls:
-            result = run_tool(tc)
+        for c in calls:
+            result = run_tool(c)
             messages.append({
                 "role": "tool",
-                "tool_call_id": tc.id,
+                "tool_call_id": c["id"],
                 "content": result,
             })
 
