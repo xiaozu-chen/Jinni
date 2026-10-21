@@ -79,9 +79,11 @@ def summarize_history():
 
     prompt = (
         "/no_think\n"
-        "Summarize this conversation as notes for your own memory."
-        "Keep: the user's name and goals, exact file names read or written,"
-        "decisions made, and anything unfinished. Drop small talk. "
+        "Summarize this conversation as notes for your own memory. "
+        "Only write facts that actually appeared. Do NOT guess goals. "
+        "Include: the user's name if given, exact file names read or written, "
+        "decisions made, and unfinished tasks. "
+        "Skip any category that has nothing. "
         "Under 150 words, bullet points.\n\n"
     )
     if summary:
