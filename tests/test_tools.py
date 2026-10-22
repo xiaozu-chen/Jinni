@@ -3,9 +3,12 @@ import httpx
 
 import pytest
 
-import tools
-from tools import TOOL_FUNCTIONS, TOOL_SCHEMAS, NEEDS_APPROVAL
-from tools import MAX_READ, safe_path, write_file, read_file, list_files,calculate, check_public_url, edit_file, fetch_url
+from tools import NEEDS_APPROVAL, TOOL_FUNCTIONS, TOOL_SCHEMAS
+from tools import web
+from tools.basic import calculate
+from tools.files import MAX_READ, edit_file, list_files, read_file, write_file
+from tools.web import check_public_url, fetch_url
+from tools.workspace import safe_path
 
 @pytest.mark.parametrize("path", ["poem.txt", "notes/poem.txt", "notes/../mm.txt", "."])
 def test_safe_path_allows_inside(workspace, path):
@@ -120,8 +123,8 @@ def test_fetch_extracts_text(monkeypatch):
             request=httpx.Request("GET", url),
         )
 
-    monkeypatch.setattr(tools.httpx, "get", fake_get)
-    monkeypatch.setattr(tools, "check_public_url", lambda url: None)
+    monkeypatch.setattr(web.httpx, "get", fake_get)
+    monkeypatch.setattr(web, "check_public_url", lambda url: None)
 
     result = fetch_url("https://example.com")
     assert "Hello" in result

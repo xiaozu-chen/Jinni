@@ -1,9 +1,9 @@
 import pytest
 
-import tools
+from tools import workspace as ws
 
 
 @pytest.fixture
 def workspace(tmp_path, monkeypatch):
-    monkeypatch.setattr(tools, "WORKSPACE", tmp_path.resolve())
+    monkeypatch.setattr(ws, "WORKSPACE", tmp_path.resolve())
     return tmp_path.resolve()

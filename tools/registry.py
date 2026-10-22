@@ -8,8 +8,9 @@ NEEDS_APPROVAL: set[str] = set()
 
 JSON_TYPES = {str: "string", int: "integer", float: "number", bool: "boolean"}
 
+
 def tool(description: str, params: dict[str, str] | None = None, approval: bool = False):
-    params or params or {}
+    params = params or {}
 
     def decorator(fn: Callable[..., str]) -> Callable[..., str]:
         name = fn.__name__
@@ -23,7 +24,7 @@ def tool(description: str, params: dict[str, str] | None = None, approval: bool 
                 raise ValueError(f"tool '{name}': parameter '{pname}' needs a description")
             properties[pname] = {
                 "type": JSON_TYPES.get(p.annotation, "string"),
-                "description": params(pname,)
+                "description": params[pname],
             }
             if p.default is inspect.Parameter.empty:
                 required.append(pname)
