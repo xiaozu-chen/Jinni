@@ -6,6 +6,8 @@ from config import settings
 from logger import setup_logging
 from agent import Agent
 
+from tools import LOAD_ERRORS, TOOL_FUNCTIONS
+
 sys.stdout.reconfigure(encoding="utf-8")
 sys.stdin.reconfigure(encoding="utf-8")
 
@@ -15,6 +17,10 @@ log = logging.getLogger("jinni.cli")
 def main():
     setup_logging()
     log.info("started, model=%s", settings.model)
+    for err in LOAD_ERRORS:
+        log.warning("plugin skipped: %s", err)
+        print(f"  (plugin skipped: {err})")
+    print(f"  ({len(TOOL_FUNCTIONS)} tools loaded)")
     agent = Agent()
     agent.load_memory()
     print("Jinni online.")
