@@ -1,10 +1,11 @@
+import asyncio
 import json
 import time
 import logging
 from typing import Any
 
 import openai
-from openai import OpenAI
+from openai import AsyncOpenAI
 
 from config import settings, GRAY, RESET
 from context import compact, to_transcript
@@ -14,35 +15,51 @@ from tools import TOOL_FUNCTIONS, TOOL_SCHEMAS, NEEDS_APPROVAL
 
 log = logging.getLogger("jinni.agent")
 RETRYABLE = (openai.APIConnectionError, openai.InternalServerError)
+DECLINED = "The user declined this action. It was their choice, not a technical error. Do not retry; ask what they want instead."
 
-def run_tool(call: ToolCall) -> str:
+def authorize(call: ToolCall) -> tuple[dict[str, Any] | None, str]:
+    # Returns (args, "") if the call may run, or (None, message_for_the_model).
     try:
         args = json.loads(call.arguments or "{}")
-        print(f"  [tool] {call.name}({args})")
-        log.info("tool call: %s %s", call.name, call.arguments[:200])
-        if call.name not in TOOL_FUNCTIONS:
-            return f"Error: unknown tool '{call.name}'"
-        if call.name in NEEDS_APPROVAL:
-            answer = input(f"  allow {call.name}? (y/n) > ").strip().lower()
-            if answer != "y":
-                log.info("user declined %s", call.name)
-                return "The user declined this action. It was their choice, not a technical error. Do not retry; ask what they want instead."
-        result = str(TOOL_FUNCTIONS[call.name](**args))
+    except json.JSONDecodeError as e:
+        return None, f"Error: the arguments were not valid JSON ({e})"
+
+    print(f"  [tool] {call.name}({args})")
+    log.info("tool calls: %s %s", call.name, call.arguments[:200])
+
+    if call.name not in TOOL_FUNCTIONS:
+        return None, f"Error: unknown tool '{call.name}'"
+    if call.name in NEEDS_APPROVAL:
+        answer = input(f"  allow {call.name}? (y/n) >").strip().lower()
+        if answer != "y":
+            log.info("user declined %s", call.name)
+            return None, DECLINED
+    return args, ""
+
+async def execute(call: ToolCall, args: dict[str, Any]) -> str:
+    try:
+        result = str(await asyncio.to_thread(TOOL_FUNCTIONS[call.name], **args))
         log.info("tool result: %s -> %d chars", call.name, len(result))
         return result
     except Exception as e:
-        log.exception("tool %s failed", call.name)
+        log.exception("tool %s faled", call.name)
         return f"Error: {e}"
 
 class Agent:
     def __init__(self) -> None:
-        self.client = OpenAI(base_url=settings.base_url, api_key="not-needed", timeout=settings.request_timeout, max_retries=0)
+        self.client = AsyncOpenAI(
+            base_url=settings.base_url, 
+            api_key="not-needed", 
+            timeout=settings.request_timeout, 
+            max_retries=0
+        )
         self.messages: list[Message] = [{"role": "system", "content": settings.system_prompt}]
         self.summary: str = ""
         self.thinking_on: bool = settings.thinking_default
+        self.parallel_tools: bool = settings.parallel_tools
 
-    def request(self, **kwargs: Any):
-        return with_retries(
+    async def request(self, **kwargs: Any):
+        return await with_retries(
             lambda: self.client.chat.completions.create(**kwargs),
             attempts=settings.retry_attempts,
             base_delay=settings.retry_delay,
@@ -69,12 +86,39 @@ class Agent:
         del self.messages[1:]
         self.apply_memory()
 
-
-    def stream_response(self) -> tuple[str, list[ToolCall], int]:
+    # new: async tool running
+    async def run_tools(self, calls: list[ToolCall]) -> list[str]:
+        plans = [authorize(c) for c in calls]
+        runnable = sum(1 for args, _ in plans if args is not None)
         start = time.perf_counter()
-        first = None
+
+        async def one(call: ToolCall, args: dict[str, Any] | None, refusal: str) -> str:
+            return refusal if args is None else await execute(call, args)
+
+        if self.parallel_tools:
+            results = list(await asyncio.gather(
+                *(one(c, a, r) for c, (a, r) in zip(calls, plans))
+            ))
+        else:
+            results = []
+            for c, (a, r) in zip(calls, plans):
+                results.append(await one(c, a, r))
+
+        if runnable:
+            if runnable == 1:
+                how = ""
+            else:
+                how = " in parallel" if self.parallel_tools else " one, by one"
+            mode = "in parallel" if self.parallel_tools else "one by one"
+            print(f"  ({runnable} tool call(s){how}: {time.perf_counter() - start:.1f}s)")
+        return results
+
+    async def stream_response(self) -> tuple[str, list[ToolCall], int]:
+        start = time.perf_counter()
+        first: float | None = None
         generated = 0
-        stream = self.request(
+
+        stream = await self.request(
             model=settings.model,
             messages=self.messages,
             tools=TOOL_SCHEMAS,
@@ -88,40 +132,45 @@ class Agent:
         used = 0
         thinking = False
 
-        for chunk in stream:
-            if chunk.usage:
-                used = chunk.usage.prompt_tokens
-                generated = chunk.usage.completion_tokens
-            if not chunk.choices:
-                continue
+        try:
+            async for chunk in stream:
+                if chunk.usage:
+                    used = chunk.usage.prompt_tokens
+                    generated = chunk.usage.completion_tokens
+                if not chunk.choices:
+                    continue
 
-            delta = chunk.choices[0].delta
+                delta = chunk.choices[0].delta
 
-            thought = getattr(delta, "reasoning_content", None)
-            if first is None and (thought or delta.content or delta.tool_calls):
-                first = time.perf_counter() - start
-            if thought and self.thinking_on:
-                if not thinking:
-                    print(f"{GRAY}[thinking] ", end="")
-                    thinking = True
-                print(f"{GRAY}{thought}{RESET}", end="", flush=True)
+                thought = getattr(delta, "reasoning_content", None)
+                if first is None and (thought or delta.content or delta.tool_calls):
+                    first = time.perf_counter() - start
 
-            if delta.content:
-                if thinking:
-                    print(f"{RESET}\n")
-                    thinking = False
-                print(delta.content, end="", flush=True)
-                content += delta.content
+                if thought and self.thinking_on:
+                    if not thinking:
+                        print(f"{GRAY}[thinking]", end="")
+                        thinking = True
+                    print(f"{GRAY}{thought}{RESET}", end="", flush=True)
 
-            for tc in delta.tool_calls or []:
-                slot = calls.setdefault(tc.index, {"id": "", "name": "", "arguments": ""})
-                if tc.id:
-                    slot["id"] = tc.id
-                if tc.function:
-                    if tc.function.name:
-                        slot["name"] += tc.function.name
-                    if tc.function.arguments:
-                        slot["arguments"] += tc.function.arguments
+                if delta.content:
+                    if thinking:
+                        print(f"{RESET}\n")
+                        thinking = False
+                    print(delta.content, end="", flush=True)
+                    content += delta.content
+
+                for tc in delta.tool_calls or []:
+                    slot = calls.setdefault(tc.index, {"id": "", "name": "", "arguments": ""})
+                    if tc.id:
+                        slot["id"] = tc.id
+                    if tc.function:
+                        if tc.function.name:
+                            slot["name"] += tc.function.name
+                        if tc.function.arguments:
+                            slot["arguments"] += tc.function.arguments
+
+        finally:
+            await stream.close()
 
         if thinking:
             print(RESET)
@@ -133,13 +182,13 @@ class Agent:
             speed = generated / (total - first)
             print(f"  (first token {first:.1f}s | total {total:.1f}s | {generated} tokens | {speed:.0f} tok/s)")
             log.info("lap timing: first=%.1fs total=%.1fs tokens=%d", first, total, generated)
-
+        
         tool_calls = [
             ToolCall(id=c["id"] or f"call_{i}", name=c["name"], arguments=c["arguments"]) for i, c, in sorted(calls.items())
         ]
         return content, tool_calls, used
 
-    def summarize_history(self, keep: int = settings.keep_turns) -> bool:
+    async def summarize_history(self, keep: int = settings.keep_turns) -> bool:
         user_idxs = [i for i, m in enumerate(self.messages) if m["role"] == "user"]
         if len(user_idxs) <= keep:
             return False
@@ -159,7 +208,7 @@ class Agent:
             prompt += f"Previous notes:\n{self.summary}\n\n"
         prompt += "New conversation:\n" + to_transcript(old)
 
-        response = self.request(
+        response = await self.request(
             model=settings.model,
             messages=[{"role": "user", "content": prompt}],
             extra_body={"chat_template_kwargs": {"enable_thinking": False}},
@@ -173,19 +222,29 @@ class Agent:
         print(f"  notes: {self.summary}")
         return True
 
-    def chat(self, user_text: str) -> None:
+    async def chat(self, user_text: str) -> None:
+        turn_start = len(self.messages)
+        try:
+            await self._turn(user_text)
+        except asyncio.CancelledError:
+            del self.messages[turn_start:]
+            log.info("turn cancelled, rolled back to %d messages", turn_start)
+            raise
+        
+
+    async def _turn(self, user_text: str) -> None:
+        turn_start = len(self.messages)
         log.info("user: %s", user_text[:200])
         self.messages.append({"role": "user", "content": user_text})
 
         for step in range(settings.max_steps):
             try:
-                content, calls, used = self.stream_response()
+                content, calls, used = await self.stream_response()
             except Exception as e:
                 log.exception("model request failed")
-                print(f"\n (model request failed: {type(e).__name__}. is llama-server running? see {settings.log_file})")
-                if self.messages[-1]["role"] == "user":
-                    self.messages.pop()
-                    print("  (your message was not sent, try again)")
+                del self.messages[turn_start:]
+                print(f"\n  (lost the connection to the model: {type(e).__name__}. see {settings.log_file})")
+                print("  (that whole turn was dropped, send your message again)")
                 return
 
             print(f"  (context: {used}/{settings.context_limit})")
@@ -197,7 +256,7 @@ class Agent:
                     log.info("compacted %d old tool results", n)
             if used > settings.context_limit * settings.summarize_at:
                 try:
-                    self.summarize_history()
+                    await self.summarize_history()
                 except Exception:
                     log.exception("summarizing failed")
                     print("  (could not summarize, continuing without it)")
@@ -220,11 +279,12 @@ class Agent:
                 ],
             })
 
-            for c in calls:
+            results = await self.run_tools(calls)
+            for c, result in zip(calls, results):
                 self.messages.append({
                     "role": "tool",
                     "tool_call_id": c.id,
-                    "content": run_tool(c),
+                    "content": result,
                 })
 
         log.warning("hit step limit (%d)", settings.max_steps)

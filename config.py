@@ -27,6 +27,7 @@ class Settings:
     request_timeout: float = 120.0
     retry_attempts: int = 3
     retry_delay: float = 1.0
+    parallel_tools: bool = True
 
     # logging
     log_file = Path = Path("jinni.log")
