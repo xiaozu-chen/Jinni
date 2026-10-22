@@ -1,22 +1,29 @@
+from dataclasses import dataclass
 from pathlib import Path
 
-# server
-BASE_URL = "http://localhost:8080/v1"
-MODEL = "qwen3"
 
-# agent
-SYSTEM_PROMPT = "You are Jinni, a helpful local AI agent. Keep answers concise."
-MAX_STEPS = 8
+@dataclass(frozen=True)
+class Settings:
+    # server
+    base_url: str = "http://localhost:8080/v1"
+    model: str = "qwen3.5"
 
-# context management
-CONTEXT_LIMIT = 16384
-COMPACT_AT = 0.7
-KEEP_RECENT = 3
-SUMMARIZE_AT = 0.8
-KEEP_TURNS = 2
+    # agent
+    system_prompt: str = "You are Jinni, a helpful local AI agent. Keep answers concise."
+    max_steps: int = 8
 
-# files
-MEMORY_FILE = Path("memory.txt")
+    # context management
+    context_limit: int = 16384 # must match the -c of llama-server
+    compact_at: float = 0.7 
+    keep_recent: int = 3
+    summarize_at: float = 0.8
+    keep_turns: int = 2
+
+    # files
+    memory_file: Path = Path("memory.txt")
+
+
+settings = Settings()
 
 # terminal colors
 GRAY = "\033[90m"

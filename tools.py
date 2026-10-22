@@ -1,21 +1,23 @@
 from datetime import datetime
 from pathlib import Path
+from collections.abc import Callable
+from typing import Any
 
 WORKSPACE = Path("workspace").resolve()
 WORKSPACE.mkdir(exist_ok=True)
 
 MAX_READ = 4000
 
-def safe_path(path):
+def safe_path(path: str) -> Path:
     full = (WORKSPACE / path).resolve()
     if not full.is_relative_to(WORKSPACE):
         raise ValueError("path is outside the workspace")
     return full
 
-def get_current_time():
+def get_current_time() -> str:
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-def list_files(path="."):
+def list_files(path: str = ".") -> str:
     try:
         folder = safe_path(path)
         return "\n".join(item.name for item in folder.iterdir()) or "(empty folder)"
@@ -32,7 +34,7 @@ def read_file(path):
     except Exception as e:
         return f"Error: {e}"
 
-def write_file(path, content):
+def write_file(path: str, content: str) -> str:
     try:
         full = safe_path(path)
         full.parent.mkdir(parents=True, exist_ok=True)
@@ -41,16 +43,16 @@ def write_file(path, content):
     except Exception as e:
         return f"Error: {e}"
 
-TOOL_FUNCTIONS = {
+TOOL_FUNCTIONS: dict[str, Callable[..., str]] = {
     "get_current_time": get_current_time,
     "list_files": list_files,
     "read_file": read_file,
     "write_file": write_file,
 }
 
-NEEDS_APPROVAL = {"write_file"}
+NEEDS_APPROVAL: set[str] = {"write_file"}
 
-TOOL_SCHEMAS = [
+TOOL_SCHEMAS: list[dict[str, Any]] = [
     {
         "type": "function",
         "function": {

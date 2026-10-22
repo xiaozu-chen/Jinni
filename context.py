@@ -1,8 +1,9 @@
-from config import KEEP_RECENT
+from config import settings
+from models import Message
 
-def compact(messages):
+def compact(messages: list[Message]) -> int:
     tool_idxs = [i for i, m in enumerate(messages) if m["role"] == "tool"]
-    old = tool_idxs[:-KEEP_RECENT]
+    old = tool_idxs[:-settings.keep_recent]
     shrunk = 0
     for i in old:
         text = messages[i]["content"]
@@ -12,7 +13,7 @@ def compact(messages):
     return shrunk
 
 
-def to_transcript(msgs):
+def to_transcript(msgs: list[Message]) -> str:
     lines = []
     for m in msgs:
         if m["role"] == "user":

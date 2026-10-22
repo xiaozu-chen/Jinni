@@ -2,68 +2,65 @@ import json
 
 from openai import OpenAI
 
-from config import (
-    BASE_URL, MODEL, SYSTEM_PROMPT, MAX_STEPS,
-    CONTEXT_LIMIT, COMPACT_AT, SUMMARIZE_AT, KEEP_TURNS,
-    MEMORY_FILE, GRAY, RESET,
-)
+from config import settings, GRAY, RESET
 from context import compact, to_transcript
+from models import Message, ToolCall
 from tools import TOOL_FUNCTIONS, TOOL_SCHEMAS, NEEDS_APPROVAL
 
-def run_tool(call):
-    name = call["name"]
+def run_tool(call: ToolCall) -> str:
     try:
-        args = json.loads(call["arguments"] or "{}")
-        print(f"  [fool] {name}({args})")
-        if name not in TOOL_FUNCTIONS:
-            return f"Error: unknown tool: '{name}"
-        if name in NEEDS_APPROVAL:
-            answer = input(f"  allow {name}? (y/n) >").strip.lower()
+        args = json.loads(call.arguments or "{}")
+        print(f"  [tool] {call.name}({args})")
+        if call.name not in TOOL_FUNCTIONS:
+            return f"Error: unknown tool '{call.name}'"
+        if call.name in NEEDS_APPROVAL:
+            answer = input(f"  allow {call.name}? (y/n) > ").strip().lower()
             if answer != "y":
                 return "The user declined this action. It was their choice, not a technical error. Do not retry; ask what they want instead."
-        return str(TOOL_FUNCTIONS[name](**args))
+        return str(TOOL_FUNCTIONS[call.name](**args))
     except Exception as e:
         return f"Error: {e}"
 
 class Agent:
-    def __init__(self):
-        self.client = OpenAI(base_url=BASE_URL, api_key="not-needed")
-        self.messages = [{"role": "system", "content": SYSTEM_PROMPT}]
-        self.summary = ""
-        self.show_thinking = True
+    def __init__(self) -> None:
+        self.client = OpenAI(base_url=settings.base_url, api_key="not-needed")
+        self.messages: list[Message] = [{"role": "system", "content": settings.system_prompt}]
+        self.summary: str = ""
+        self.thinking_on: bool = True
 
-    def apply_memory(self):
-        text = SYSTEM_PROMPT
+    def apply_memory(self) -> None:
+        text = settings.system_prompt
         if self.summary:
             text += "\n\nYour memory of earlier conversation:\n" + self.summary
         self.messages[0]["content"] = text
 
-    def save_memory(self):
-        MEMORY_FILE.write_text(self.summary, encoding="utf-8")
+    def save_memory(self) -> None:
+        settings.memory_file.write_text(self.summary, encoding="utf-8")
 
-    def load_memory(self):
-        if MEMORY_FILE.exists():
-            self.summary = MEMORY_FILE.read_text(encoding="utf-8").strip()
+    def load_memory(self) -> None:
+        if settings.memory_file.exists():
+            self.summary = settings.memory_file.read_text(encoding="utf-8").strip()
             self.apply_memory()
 
-    def forget(self):
+    def forget(self) -> None:
         self.summary = ""
-        MEMORY_FILE.unlink(missing_ok=True)
+        settings.memory_file.unlink(missing_ok=True)
         del self.messages[1:]
         self.apply_memory()
 
 
-    def stream_response(self):
+    def stream_response(self) -> tuple[str, list[ToolCall], int]:
         stream = self.client.chat.completions.create(
-            model=MODEL,
+            model=settings.model,
             messages=self.messages,
             tools=TOOL_SCHEMAS,
             stream=True,
             stream_options={"include_usage": True},
+            extra_body={"chat_template_kwargs": {"enable_thinking": self.thinking_on}},
         )
 
         content = ""
-        calls = {}
+        calls: dict[int, dict[str, str]] = {}
         used = 0
         thinking = False
 
@@ -76,7 +73,7 @@ class Agent:
             delta = chunk.choices[0].delta
 
             thought = getattr(delta, "reasoning_content", None)
-            if thought and self.show_thinking:
+            if thought and self.thinking_on:
                 if not thinking:
                     print(f"{GRAY}[thinking] ", end="")
                     thinking = True
@@ -104,15 +101,12 @@ class Agent:
         if content:
             print()
 
-        tool_calls = []
-        for i in sorted(calls):
-            c = calls[i]
-            c["id"] = c["id"] or f"call_{i}"
-            tool_calls.append(c)
-
+        tool_calls = [
+            ToolCall(id=c["id"] or f"call_{i}", name=c["name"], arguments=c["arguments"]) for i, c, in sorted(calls.items())
+        ]
         return content, tool_calls, used
 
-    def summarize_history(self, keep=KEEP_TURNS):
+    def summarize_history(self, keep: int = settings.keep_turns) -> bool:
         user_idxs = [i for i, m in enumerate(self.messages) if m["role"] == "user"]
         if len(user_idxs) <= keep:
             return False
@@ -121,7 +115,6 @@ class Agent:
         old = self.messages[1:cut]
 
         prompt = (
-            "/no_think\n"
             "Summarize this conversation as notes for your own memory. "
             "Only write facts that actually appeared. Do NOT guess goals. "
             "Include: the user's name if given, exact file names read or written, "
@@ -134,10 +127,11 @@ class Agent:
         prompt += "New conversation:\n" + to_transcript(old)
 
         response = self.client.chat.completions.create(
-            model=MODEL,
+            model=settings.model,
             messages=[{"role": "user", "content": prompt}],
+            extra_body={"chat_template_kwargs": {"enable_thinking": False}},
         )
-        self.summary = response.choices[0].message.content.strip()
+        self.summary = (response.choices[0].message.content or "").strip()
 
         self.apply_memory()
         self.save_memory()
@@ -146,18 +140,18 @@ class Agent:
         print(f"  notes: {self.summary}")
         return True
 
-    def chat(self, user_text):
+    def chat(self, user_text: str) -> None:
         self.messages.append({"role": "user", "content": user_text})
 
-        for step in range(MAX_STEPS):
+        for step in range(settings.max_steps):
             content, calls, used = self.stream_response()
 
-            print(f"  (context: {used}/{CONTEXT_LIMIT})")
-            if used > CONTEXT_LIMIT * COMPACT_AT:
+            print(f"  (context: {used}/{settings.context_limit})")
+            if used > settings.context_limit * settings.compact_at:
                 n = compact(self.messages)
                 if n:
                     print(f"  (compacted {n} old tool results)")
-            if used > CONTEXT_LIMIT * SUMMARIZE_AT:
+            if used > settings.context_limit * settings.summarize_at:
                 self.summarize_history()
 
             if not calls:
@@ -169,20 +163,19 @@ class Agent:
                 "content": content,
                 "tool_calls": [
                     {
-                        "id": c["id"],
+                        "id": c.id,
                         "type": "function",
-                        "function": {"name": c["name"], "arguments": c["arguments"]},
+                        "function": {"name": c.name, "arguments": c.arguments},
                     }
                     for c in calls
                 ],
             })
 
             for c in calls:
-                result = run_tool(c)
                 self.messages.append({
                     "role": "tool",
-                    "tool_call_id": c["id"],
-                    "content": result,
+                    "tool_call_id": c.id,
+                    "content": run_tool(c),
                 })
 
         print("(hit the step limit, stopping)")
