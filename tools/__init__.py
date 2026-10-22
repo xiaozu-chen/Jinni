@@ -17,4 +17,7 @@ def load_plugins() -> list[str]:
         try:
             import_module(f"{__name__}.{info.name}")
         except Exception as e:
-            errors.append(f"{info.name}: {type(e).__name__}")
+            errors.append(f"{info.name}: {type(e).__name__}: {e}")
+    return errors
+
+LOAD_ERRORS = load_plugins()
