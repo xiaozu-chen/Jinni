@@ -1,0 +1,106 @@
+2026-10-22 17:18:40,744 INFO    jinni.cli: started, model=qwen3.5
+2026-10-22 17:18:46,080 INFO    jinni.agent: user: what time is it?
+2026-10-22 17:18:48,156 WARNING jinni.retry: attemp 1/3 failed (APIConnectionError), retrying in 1.0s
+2026-10-22 17:18:51,184 WARNING jinni.retry: attemp 2/3 failed (APIConnectionError), retrying in 2.0s
+2026-10-22 17:18:55,218 ERROR   jinni.agent: model request failed
+Traceback (most recent call last):
+  File "C:\Users\Carl Delfino\Projects\Jinni\venv\Lib\site-packages\httpx2\_transports\default.py", line 98, in map_httpcore_exceptions
+    yield
+  File "C:\Users\Carl Delfino\Projects\Jinni\venv\Lib\site-packages\httpx2\_transports\default.py", line 245, in handle_request
+    resp = self._pool.handle_request(req)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Carl Delfino\Projects\Jinni\venv\Lib\site-packages\httpcore2\_sync\connection_pool.py", line 242, in handle_request
+    raise exc from None
+  File "C:\Users\Carl Delfino\Projects\Jinni\venv\Lib\site-packages\httpcore2\_sync\connection_pool.py", line 224, in handle_request
+    response = connection.handle_request(pool_request.request)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Carl Delfino\Projects\Jinni\venv\Lib\site-packages\httpcore2\_sync\connection.py", line 94, in handle_request
+    raise exc
+  File "C:\Users\Carl Delfino\Projects\Jinni\venv\Lib\site-packages\httpcore2\_sync\connection.py", line 74, in handle_request
+    stream = self._connect(request)
+             ^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Carl Delfino\Projects\Jinni\venv\Lib\site-packages\httpcore2\_sync\connection.py", line 117, in _connect
+    stream = self._network_backend.connect_tcp(**kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Carl Delfino\Projects\Jinni\venv\Lib\site-packages\httpcore2\_backends\sync.py", line 203, in connect_tcp
+    with map_exceptions(exc_map):
+  File "C:\Users\Carl Delfino\AppData\Local\Programs\Python\Python311\Lib\contextlib.py", line 158, in __exit__
+    self.gen.throw(typ, value, traceback)
+  File "C:\Users\Carl Delfino\Projects\Jinni\venv\Lib\site-packages\httpcore2\_exceptions.py", line 17, in map_exceptions
+    raise to_exc(exc) from exc
+httpcore2.ConnectError: [WinError 10061] No connection could be made because the target machine actively refused it
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "C:\Users\Carl Delfino\Projects\Jinni\venv\Lib\site-packages\openai\_base_client.py", line 1148, in request
+    response = self._send_request(
+               ^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Carl Delfino\Projects\Jinni\venv\Lib\site-packages\openai\_client.py", line 609, in _send_request
+    response = self._send_with_auth_retry(request, stream=stream, **kwargs)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Carl Delfino\Projects\Jinni\venv\Lib\site-packages\openai\_client.py", line 588, in _send_with_auth_retry
+    response = super()._send_request(request, stream=stream, **kwargs)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Carl Delfino\Projects\Jinni\venv\Lib\site-packages\openai\_base_client.py", line 1069, in _send_request
+    return self._client.send(request, stream=stream, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Carl Delfino\Projects\Jinni\venv\Lib\site-packages\httpx2\_client.py", line 980, in send
+    response = self._send_handling_auth(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Carl Delfino\Projects\Jinni\venv\Lib\site-packages\httpx2\_client.py", line 1008, in _send_handling_auth
+    response = self._send_handling_redirects(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Carl Delfino\Projects\Jinni\venv\Lib\site-packages\httpx2\_client.py", line 1043, in _send_handling_redirects
+    response = self._send_single_request(request)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Carl Delfino\Projects\Jinni\venv\Lib\site-packages\httpx2\_client.py", line 1076, in _send_single_request
+    response = transport.handle_request(request)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Carl Delfino\Projects\Jinni\venv\Lib\site-packages\httpx2\_transports\default.py", line 244, in handle_request
+    with map_httpcore_exceptions():
+  File "C:\Users\Carl Delfino\AppData\Local\Programs\Python\Python311\Lib\contextlib.py", line 158, in __exit__
+    self.gen.throw(typ, value, traceback)
+  File "C:\Users\Carl Delfino\Projects\Jinni\venv\Lib\site-packages\httpx2\_transports\default.py", line 115, in map_httpcore_exceptions
+    raise mapped_exc(message) from exc
+httpx2.ConnectError: [WinError 10061] No connection could be made because the target machine actively refused it
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "C:\Users\Carl Delfino\Projects\Jinni\agent.py", line 182, in chat
+    content, calls, used = self.stream_response()
+                           ^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Carl Delfino\Projects\Jinni\agent.py", line 77, in stream_response
+    stream = self.request(
+             ^^^^^^^^^^^^^
+  File "C:\Users\Carl Delfino\Projects\Jinni\agent.py", line 45, in request
+    return with_retries(
+           ^^^^^^^^^^^^^
+  File "C:\Users\Carl Delfino\Projects\Jinni\retry.py", line 18, in with_retries
+    return fn()
+           ^^^^
+  File "C:\Users\Carl Delfino\Projects\Jinni\agent.py", line 46, in <lambda>
+    lambda: self.client.chat.completions.create(**kwargs),
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Carl Delfino\Projects\Jinni\venv\Lib\site-packages\openai\_utils\_utils.py", line 298, in wrapper
+    return func(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Carl Delfino\Projects\Jinni\venv\Lib\site-packages\openai\resources\chat\completions\completions.py", line 1318, in create
+    return self._post(
+           ^^^^^^^^^^^
+  File "C:\Users\Carl Delfino\Projects\Jinni\venv\Lib\site-packages\openai\_base_client.py", line 1440, in post
+    return cast(ResponseT, self.request(cast_to, opts, stream=stream, stream_cls=stream_cls))
+                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Carl Delfino\Projects\Jinni\venv\Lib\site-packages\openai\_base_client.py", line 1183, in request
+    raise APIConnectionError(request=request) from err
+openai.APIConnectionError: Connection error.
+2026-10-22 17:24:55,741 INFO    jinni.cli: started, model=qwen3.5
+2026-10-22 17:24:58,545 INFO    jinni.agent: user: what time is it?
+2026-10-22 17:24:59,516 INFO    jinni.agent: lap timing: first=0.8s total=1.0s tokens=15
+2026-10-22 17:24:59,516 INFO    jinni.agent: lap 1: context 511/16384
+2026-10-22 17:24:59,516 INFO    jinni.agent: tool call: get_current_time {}
+2026-10-22 17:24:59,517 INFO    jinni.agent: tool result: get_current_time -> 19 chars
+2026-10-22 17:25:00,207 INFO    jinni.agent: lap timing: first=0.1s total=0.7s tokens=26
+2026-10-22 17:25:00,207 INFO    jinni.agent: lap 2: context 562/16384
+2026-10-22 17:25:00,207 INFO    jinni.agent: jinni: The current time is 2026-10-22 17:24:59.

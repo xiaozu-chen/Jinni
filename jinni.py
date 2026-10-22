@@ -1,12 +1,20 @@
 import sys
+import logging
+
+from config import settings
+from logger import setup_logging
 
 from agent import Agent
 
 sys.stdout.reconfigure(encoding="utf-8")
 sys.stdin.reconfigure(encoding="utf-8")
 
+log = logging.getLogger("jinni.cli")
+
 
 def main():
+    setup_logging()
+    log.info("started, model=%s", settings.model)
     agent = Agent()
     agent.load_memory()
     print("Jinni online. type 'exit' to leave.")
@@ -40,6 +48,7 @@ def main():
     try:
         agent.summarize_history(keep=0)
     except Exception as e:
+        log.exception("could not save memory")
         print(f"  (could not save memory: {e})")
 
 

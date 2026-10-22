@@ -1,0 +1,18 @@
+import logging
+from logging.handlers import RotatingFileHandler
+
+from config import settings
+
+def setup_logging() -> None:
+    logger = logging.getLogger("jinni")
+    if logger.handlers:
+        return
+    logger.setLevel(logging.DEBUG)
+    handler = RotatingFileHandler(
+        settings.log_file, maxBytes=500_000, backupCount=2, encoding="utf-8"
+    )
+    handler.setFormatter(
+        logging.Formatter("%(asctime)s %(levelname)-7s %(name)s: %(message)s")
+    )
+    logger.addHandler(handler)
+    logger.propagate = False

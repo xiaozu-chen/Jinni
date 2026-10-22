@@ -23,6 +23,14 @@ class Settings:
     # files
     memory_file: Path = Path("memory.txt")
 
+    # reliability
+    request_timeout: float = 120.0
+    retry_attempts: int = 3
+    retry_delay: float = 1.0
+
+    # logging
+    log_file = Path = Path("jinni.log")
+
 
 settings = Settings()
 

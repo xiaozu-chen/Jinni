@@ -1,33 +1,53 @@
 import json
 import time
+import logging
+from typing import Any
 
+import openai
 from openai import OpenAI
 
 from config import settings, GRAY, RESET
 from context import compact, to_transcript
 from models import Message, ToolCall
+from retry import with_retries
 from tools import TOOL_FUNCTIONS, TOOL_SCHEMAS, NEEDS_APPROVAL
+
+log = logging.getLogger("jinni.agent")
+RETRYABLE = (openai.APIConnectionError, openai.InternalServerError)
 
 def run_tool(call: ToolCall) -> str:
     try:
         args = json.loads(call.arguments or "{}")
         print(f"  [tool] {call.name}({args})")
+        log.info("tool call: %s %s", call.name, call.arguments[:200])
         if call.name not in TOOL_FUNCTIONS:
             return f"Error: unknown tool '{call.name}'"
         if call.name in NEEDS_APPROVAL:
             answer = input(f"  allow {call.name}? (y/n) > ").strip().lower()
             if answer != "y":
+                log.info("user declined %s", call.name)
                 return "The user declined this action. It was their choice, not a technical error. Do not retry; ask what they want instead."
-        return str(TOOL_FUNCTIONS[call.name](**args))
+        result = str(TOOL_FUNCTIONS[call.name](**args))
+        log.info("tool result: %s -> %d chars", call.name, len(result))
+        return result
     except Exception as e:
+        log.exception("tool %s failed", call.name)
         return f"Error: {e}"
 
 class Agent:
     def __init__(self) -> None:
-        self.client = OpenAI(base_url=settings.base_url, api_key="not-needed")
+        self.client = OpenAI(base_url=settings.base_url, api_key="not-needed", timeout=settings.request_timeout, max_retries=0)
         self.messages: list[Message] = [{"role": "system", "content": settings.system_prompt}]
         self.summary: str = ""
         self.thinking_on: bool = settings.thinking_default
+
+    def request(self, **kwargs: Any):
+        return with_retries(
+            lambda: self.client.chat.completions.create(**kwargs),
+            attempts=settings.retry_attempts,
+            base_delay=settings.retry_delay,
+            retry_on=RETRYABLE,
+        )
 
     def apply_memory(self) -> None:
         text = settings.system_prompt
@@ -54,7 +74,7 @@ class Agent:
         start = time.perf_counter()
         first = None
         generated = 0
-        stream = self.client.chat.completions.create(
+        stream = self.request(
             model=settings.model,
             messages=self.messages,
             tools=TOOL_SCHEMAS,
@@ -112,6 +132,7 @@ class Agent:
         if first is not None and total > first and generated:
             speed = generated / (total - first)
             print(f"  (first token {first:.1f}s | total {total:.1f}s | {generated} tokens | {speed:.0f} tok/s)")
+            log.info("lap timing: first=%.1fs total=%.1fs tokens=%d", first, total, generated)
 
         tool_calls = [
             ToolCall(id=c["id"] or f"call_{i}", name=c["name"], arguments=c["arguments"]) for i, c, in sorted(calls.items())
@@ -138,7 +159,7 @@ class Agent:
             prompt += f"Previous notes:\n{self.summary}\n\n"
         prompt += "New conversation:\n" + to_transcript(old)
 
-        response = self.client.chat.completions.create(
+        response = self.request(
             model=settings.model,
             messages=[{"role": "user", "content": prompt}],
             extra_body={"chat_template_kwargs": {"enable_thinking": False}},
@@ -153,20 +174,36 @@ class Agent:
         return True
 
     def chat(self, user_text: str) -> None:
+        log.info("user: %s", user_text[:200])
         self.messages.append({"role": "user", "content": user_text})
 
         for step in range(settings.max_steps):
-            content, calls, used = self.stream_response()
+            try:
+                content, calls, used = self.stream_response()
+            except Exception as e:
+                log.exception("model request failed")
+                print(f"\n (model request failed: {type(e).__name__}. is llama-server running? see {settings.log_file})")
+                if self.messages[-1]["role"] == "user":
+                    self.messages.pop()
+                    print("  (your message was not sent, try again)")
+                return
 
             print(f"  (context: {used}/{settings.context_limit})")
+            log.info("lap %d: context %d/%d", step + 1, used, settings.context_limit)
             if used > settings.context_limit * settings.compact_at:
                 n = compact(self.messages)
                 if n:
                     print(f"  (compacted {n} old tool results)")
+                    log.info("compacted %d old tool results", n)
             if used > settings.context_limit * settings.summarize_at:
-                self.summarize_history()
+                try:
+                    self.summarize_history()
+                except Exception:
+                    log.exception("summarizing failed")
+                    print("  (could not summarize, continuing without it)")
 
             if not calls:
+                log.info("jinni: %s", content[:200])
                 self.messages.append({"role": "assistant", "content": content})
                 return
 
@@ -190,4 +227,5 @@ class Agent:
                     "content": run_tool(c),
                 })
 
+        log.warning("hit step limit (%d)", settings.max_steps)
         print("(hit the step limit, stopping)")

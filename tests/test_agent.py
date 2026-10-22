@@ -1,4 +1,8 @@
 import json
+import httpx
+import openai
+
+from agent import Agent
 
 from agent import run_tool
 from models import ToolCall
@@ -36,3 +40,14 @@ def test_approved_write_works(workspace, monkeypatch):
     run_tool(make_call("write_file", {"path": "a.txt", "content": "x"}))
 
     assert (workspace / "a.txt").read_text(encoding="utf-8") == "x"
+
+def test_failed_request_does_not_corrupt_history(monkeypatch):
+    def boom(self):
+        raise openai.APIConnectionError(request=httpx.Request("POST", "http://x"))
+
+    monkeypatch.setattr(Agent, "stream_response", boom)
+    agent = Agent()
+    agent.chat("hello")
+
+    assert len(agent.messages) == 1
+    assert agent.messages[0]["role"] == "system"
