@@ -8,7 +8,7 @@ def compact(messages: list[Message]) -> int:
     for i in old:
         text = messages[i]["content"]
         if len(text) > 200:
-            messages[i]["content"] = text[:150] + "  ...[trimemd to save context]"
+            messages[i]["content"] = text[:150] + "  ...[trimmed to save context]"
             shrunk += 1
     return shrunk
 
