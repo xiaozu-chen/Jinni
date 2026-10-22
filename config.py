@@ -5,12 +5,13 @@ from pathlib import Path
 @dataclass(frozen=True)
 class Settings:
     # server
-    base_url: str = "http://localhost:8080/v1"
+    base_url: str = "http://127.0.0.1:8080/v1"
     model: str = "qwen3.5"
 
     # agent
     system_prompt: str = "You are Jinni, a helpful local AI agent. Keep answers concise."
     max_steps: int = 8
+    thinking_default: bool = False
 
     # context management
     context_limit: int = 16384 # must match the -c of llama-server

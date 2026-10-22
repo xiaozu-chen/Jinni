@@ -1,4 +1,5 @@
 import json
+import time
 
 from openai import OpenAI
 
@@ -26,7 +27,7 @@ class Agent:
         self.client = OpenAI(base_url=settings.base_url, api_key="not-needed")
         self.messages: list[Message] = [{"role": "system", "content": settings.system_prompt}]
         self.summary: str = ""
-        self.thinking_on: bool = True
+        self.thinking_on: bool = settings.thinking_default
 
     def apply_memory(self) -> None:
         text = settings.system_prompt
@@ -50,6 +51,9 @@ class Agent:
 
 
     def stream_response(self) -> tuple[str, list[ToolCall], int]:
+        start = time.perf_counter()
+        first = None
+        generated = 0
         stream = self.client.chat.completions.create(
             model=settings.model,
             messages=self.messages,
@@ -67,17 +71,20 @@ class Agent:
         for chunk in stream:
             if chunk.usage:
                 used = chunk.usage.prompt_tokens
+                generated = chunk.usage.completion_tokens
             if not chunk.choices:
                 continue
 
             delta = chunk.choices[0].delta
 
             thought = getattr(delta, "reasoning_content", None)
+            if first is None and (thought or delta.content or delta.tool_calls):
+                first = time.perf_counter() - start
             if thought and self.thinking_on:
                 if not thinking:
                     print(f"{GRAY}[thinking] ", end="")
                     thinking = True
-                print(thought, end="", flush=True)
+                print(f"{GRAY}{thought}{RESET}", end="", flush=True)
 
             if delta.content:
                 if thinking:
@@ -100,6 +107,11 @@ class Agent:
             print(RESET)
         if content:
             print()
+
+        total = time.perf_counter() - start
+        if first is not None and total > first and generated:
+            speed = generated / (total - first)
+            print(f"  (first token {first:.1f}s | total {total:.1f}s | {generated} tokens | {speed:.0f} tok/s)")
 
         tool_calls = [
             ToolCall(id=c["id"] or f"call_{i}", name=c["name"], arguments=c["arguments"]) for i, c, in sorted(calls.items())

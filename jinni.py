@@ -22,7 +22,7 @@ def main():
                 continue
             if user_text == "/think":
                 agent.thinking_on = not agent.thinking_on
-                print(f"  (thinking display: {'on' if agent.thinking_on else 'off'})")
+                print(f"  (thinking: {'on' if agent.thinking_on else 'off'})")
                 continue
             if user_text == "/memory":
                 print(agent.summary or "  (no memories yet)")
