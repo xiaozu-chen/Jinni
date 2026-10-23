@@ -2,11 +2,13 @@ import asyncio
 import sys
 import logging
 
+import webbrowser
 from config import settings
 from logger import setup_logging
 from agent import Agent
 from review import review
 from tools import LOAD_ERRORS, NEEDS_APPROVAL, TOOL_FUNCTIONS
+from tools.workspace import find_chart
 
 sys.stdout.reconfigure(encoding="utf-8")
 sys.stdin.reconfigure(encoding="utf-8")
@@ -82,6 +84,15 @@ def main() -> None:
                     continue
                 if cmd == "/forget":
                     forget_command(agent, arg.strip())
+                    continue
+                if cmd == "/open":
+                    page = find_chart(arg.strip())
+                    if page is None:
+                        print("  (no chart found. ask Jinni to one first)")
+                    elif webbrowser.open(page.as_uri()):
+                        print(f"  (opened {page.name})")
+                    else:
+                        print(f"  (could not open a browser. the file is at {page})")
                     continue
                 print("jinni > ", end="")
                 try:
