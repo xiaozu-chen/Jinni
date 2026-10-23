@@ -30,11 +30,18 @@ class Settings:
     parallel_tools: bool = True
 
     # logging
-    log_file = Path = Path("jinni.log")
+    log_file: Path = Path("jinni.log")
 
     # search
     search_backend: str = "auto"
     search_region: str = "us-en"
+
+    # memory
+    memory_db: Path = Path("memory.db")
+    max_facts: int = 20
+    max_fact_chars: int = 200
+    max_event_chars: int = 600
+    recall_results: int = 5
 
 
 settings = Settings()

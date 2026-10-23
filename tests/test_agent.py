@@ -5,6 +5,9 @@ import time
 import httpx
 import openai
 import pytest
+from types import SimpleNamespace
+
+from memory import Proposal
 
 from agent import Agent, authorize, execute
 from models import ToolCall
@@ -178,3 +181,36 @@ def test_non_object_arguments_are_rejected():
     args, message = authorize(ToolCall(id="1", name="list_files", arguments="[1, 2]"))
     assert args is None
     assert message.startswith("Error")
+
+def test_system_prompt_contains_saved_facts(memory_store):
+    agent = Agent()
+    memory_store.add("fact", "The user's name is Carl.")
+    agent.apply_memory()
+    assert "Carl" in agent.messages[0]["content"]
+
+    memory_store.clear()
+    agent.apply_memory()
+    assert "Carl" not in agent.messages[0]["content"]
+
+
+def test_proposals_come_from_the_model_reply(monkeypatch):
+    async def fake_request(self, **kwargs):
+        message = SimpleNamespace(content="FACT: Likes cats.\nSUMMARY: Said hi.")
+        return SimpleNamespace(choices=[SimpleNamespace(message=message)])
+
+    monkeypatch.setattr(Agent, "request", fake_request)
+    agent = Agent()
+    agent.messages.append({"role": "user", "content": "hi, I like cats"})
+
+    assert asyncio.run(agent.propose_memories()) == [
+        Proposal("fact", "Likes cats."),
+        Proposal("event", "Said hi."),
+    ]
+
+
+def test_no_proposals_for_an_empty_session(monkeypatch):
+    async def explode(self, **kwargs):
+        raise AssertionError("the model should not be called")
+
+    monkeypatch.setattr(Agent, "request", explode)
+    assert asyncio.run(Agent().propose_memories()) == []
