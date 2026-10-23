@@ -11,14 +11,15 @@ from config import settings, GRAY, RESET
 from context import compact, to_transcript
 from models import Message, ToolCall
 from retry import with_retries
-from tools import TOOL_FUNCTIONS, TOOL_SCHEMAS, NEEDS_APPROVAL
+from tools import TOOL_FUNCTIONS, REMEMBERABLE, TOOL_SCHEMAS, NEEDS_APPROVAL
 
 log = logging.getLogger("jinni.agent")
 RETRYABLE = (openai.APIConnectionError, openai.InternalServerError)
 DECLINED = "The user declined this action. It was their choice, not a technical error. Do not retry; ask what they want instead."
 
-def authorize(call: ToolCall) -> tuple[dict[str, Any] | None, str]:
+def authorize(call: ToolCall, allowed: set[str] | None = None) -> tuple[dict[str, Any] | None, str]:
     # Returns (args, "") if the call may run, or (None, message_for_the_model).
+    allowed = set() if allowed is None else allowed
     try:
         args = json.loads(call.arguments or "{}")
     except json.JSONDecodeError as e:
@@ -29,9 +30,15 @@ def authorize(call: ToolCall) -> tuple[dict[str, Any] | None, str]:
 
     if call.name not in TOOL_FUNCTIONS:
         return None, f"Error: unknown tool '{call.name}'"
-    if call.name in NEEDS_APPROVAL:
-        answer = input(f"  allow {call.name}? (y/n) >").strip().lower()
-        if answer != "y":
+    
+    if call.name in NEEDS_APPROVAL and call.name not in allowed:
+        remember = call.name in REMEMBERABLE
+        choices = "y/n/a=always allow this session" if remember else "y/n"
+        answer = input(f"  allow {call.name} ({choices}) > ").strip().lower()
+        if answer == "a" and remember:
+            allowed.add(call.name)
+            log.info("user allowed %s for this session", call.name)
+        elif answer != "y":
             log.info("user declined %s", call.name)
             return None, DECLINED
     return args, ""
@@ -39,7 +46,7 @@ def authorize(call: ToolCall) -> tuple[dict[str, Any] | None, str]:
 async def execute(call: ToolCall, args: dict[str, Any]) -> str:
     try:
         result = str(await asyncio.to_thread(TOOL_FUNCTIONS[call.name], **args))
-        log.info("tool result: %s -> %d chars", call.name, len(result))
+        log.info("tool result: %s -> %d chars: %r", call.name, len(result), result[:200])
         return result
     except Exception as e:
         log.exception("tool %s faled", call.name)
@@ -57,6 +64,7 @@ class Agent:
         self.summary: str = ""
         self.thinking_on: bool = settings.thinking_default
         self.parallel_tools: bool = settings.parallel_tools
+        self.allowed: set[str] = set()
 
     async def request(self, **kwargs: Any):
         return await with_retries(
@@ -88,7 +96,7 @@ class Agent:
 
     # new: async tool running
     async def run_tools(self, calls: list[ToolCall]) -> list[str]:
-        plans = [authorize(c) for c in calls]
+        plans = [authorize(c, self.allowed) for c in calls]
         runnable = sum(1 for args, _ in plans if args is not None)
         start = time.perf_counter()
 

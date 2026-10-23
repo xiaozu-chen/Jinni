@@ -9,6 +9,7 @@ import pytest
 from agent import Agent, authorize, execute
 from models import ToolCall
 from tools import TOOL_FUNCTIONS
+import agent as agent_mod
 
 
 def make_call(name, args):
@@ -127,3 +128,33 @@ def test_failure_after_tool_lap_rolls_back_whole_turn(monkeypatch):
     asyncio.run(agent.chat("what time is it?"))
 
     assert len(agent.messages) == 1
+
+
+@pytest.fixture
+def ping_tool(monkeypatch):
+    monkeypatch.setitem(TOOL_FUNCTIONS, "ping", lambda: "pong")
+    monkeypatch.setattr(agent_mod, "NEEDS_APPROVAL", agent_mod.NEEDS_APPROVAL | {"ping"})
+    monkeypatch.setattr(agent_mod, "REMEMBERABLE", agent_mod.REMEMBERABLE | {"ping"})
+
+
+def test_always_allow_is_asked_only_once(ping_tool, monkeypatch):
+    answers = iter(["a"])
+    monkeypatch.setattr("builtins.input", lambda _: next(answers))
+    allowed: set[str] = set()
+
+    first, _ = authorize(make_call("ping", {}), allowed)
+    second, _ = authorize(make_call("ping", {}), allowed)
+
+    assert first == {} and second == {}
+    assert allowed == {"ping"}
+
+
+def test_always_is_refused_for_dangerous_tools(workspace, monkeypatch):
+    monkeypatch.setattr("builtins.input", lambda _: "a")
+    allowed: set[str] = set()
+
+    args, _ = authorize(make_call("write_file", {"path": "a.txt", "content": "x"}), allowed)
+
+    assert args is None
+    assert allowed == set()
+    assert not (workspace / "a.txt").exists()

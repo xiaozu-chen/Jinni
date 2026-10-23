@@ -32,6 +32,10 @@ class Settings:
     # logging
     log_file = Path = Path("jinni.log")
 
+    # search
+    search_backend: str = "auto"
+    search_region: str = "us-en"
+
 
 settings = Settings()
 

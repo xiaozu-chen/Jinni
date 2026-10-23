@@ -10,6 +10,7 @@ def clean_registry(monkeypatch):
     monkeypatch.setattr(registry, "TOOL_FUNCTIONS", {})
     monkeypatch.setattr(registry, "TOOL_SCHEMAS", [])
     monkeypatch.setattr(registry, "NEEDS_APPROVAL", set())
+    monkeypatch.setattr(registry, "REMEMBERABLE", set())
 
 
 def test_schema_is_built_from_the_signature(clean_registry):
@@ -78,3 +79,13 @@ def test_broken_plugin_is_skipped_not_fatal(monkeypatch):
 
     assert len(errors) == 1
     assert "basic" in errors[0]
+
+def test_remember_requires_approval(clean_registry):
+    with pytest.raises(ValueError):
+        @tool(description="x", remember=True)
+        def demo() -> str:
+            return ""
+
+
+def test_only_safe_tools_are_rememberable():
+    assert not ({"write_file", "edit_file", "fetch_url"} & tools.REMEMBERABLE)

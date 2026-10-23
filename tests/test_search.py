@@ -10,7 +10,7 @@ def fake_ddgs(results=None, error=None):
         def __init__(self, **kwargs):
             pass
 
-        def text(self, query, max_results=5):
+        def text(self, query, **kwargs):
             if error:
                 raise error
             return results

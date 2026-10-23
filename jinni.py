@@ -6,7 +6,7 @@ from config import settings
 from logger import setup_logging
 from agent import Agent
 
-from tools import LOAD_ERRORS, TOOL_FUNCTIONS
+from tools import LOAD_ERRORS, NEEDS_APPROVAL, TOOL_FUNCTIONS
 
 sys.stdout.reconfigure(encoding="utf-8")
 sys.stdin.reconfigure(encoding="utf-8")
@@ -49,6 +49,13 @@ def main():
                 if user_text == "/forget":
                     agent.forget()
                     print("  (memory wiped)")
+                    continue
+                if user_text == "/tools":
+                    for name in TOOL_FUNCTIONS:
+                        note = ""
+                        if name in NEEDS_APPROVAL:
+                            note = "  (always allowed)" if name in agent.allowed else "  (asks first)"
+                            print(f"  {name}{note}")
                     continue
                 print("jinni > ", end="")
                 try:
