@@ -140,13 +140,13 @@ def ping_tool(monkeypatch):
 def test_always_allow_is_asked_only_once(ping_tool, monkeypatch):
     answers = iter(["a"])
     monkeypatch.setattr("builtins.input", lambda _: next(answers))
-    allowed: set[str] = set()
+    allowed: set[tuple[str, str]] = set()
 
     first, _ = authorize(make_call("ping", {}), allowed)
     second, _ = authorize(make_call("ping", {}), allowed)
 
     assert first == {} and second == {}
-    assert allowed == {"ping"}
+    assert allowed == {("ping", "*")}
 
 
 def test_always_is_refused_for_dangerous_tools(workspace, monkeypatch):
@@ -158,3 +158,23 @@ def test_always_is_refused_for_dangerous_tools(workspace, monkeypatch):
     assert args is None
     assert allowed == set()
     assert not (workspace / "a.txt").exists()
+
+def test_domain_approval_covers_only_that_domain(monkeypatch):
+    answers = iter(["a", "n"])
+    monkeypatch.setattr("builtins.input", lambda _: next(answers))
+    allowed: set[tuple[str, str]] = set()
+
+    first, _ = authorize(make_call("fetch_url", {"url": "https://www.mayoclinic.org/diet"}), allowed)
+    again, _ = authorize(make_call("fetch_url", {"url": "https://mayoclinic.org/other"}), allowed)
+    other, _ = authorize(make_call("fetch_url", {"url": "https://evil.example/x"}), allowed)
+
+    assert first is not None
+    assert again is not None
+    assert other is None
+    assert allowed == {("fetch_url", "mayoclinic.org")}
+
+
+def test_non_object_arguments_are_rejected():
+    args, message = authorize(ToolCall(id="1", name="list_files", arguments="[1, 2]"))
+    assert args is None
+    assert message.startswith("Error")

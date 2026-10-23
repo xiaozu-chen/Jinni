@@ -11,19 +11,21 @@ from config import settings, GRAY, RESET
 from context import compact, to_transcript
 from models import Message, ToolCall
 from retry import with_retries
-from tools import TOOL_FUNCTIONS, REMEMBERABLE, TOOL_SCHEMAS, NEEDS_APPROVAL
+from tools import TOOL_FUNCTIONS, REMEMBERABLE, SCOPES, TOOL_SCHEMAS, NEEDS_APPROVAL
 
 log = logging.getLogger("jinni.agent")
 RETRYABLE = (openai.APIConnectionError, openai.InternalServerError)
 DECLINED = "The user declined this action. It was their choice, not a technical error. Do not retry; ask what they want instead."
 
-def authorize(call: ToolCall, allowed: set[str] | None = None) -> tuple[dict[str, Any] | None, str]:
+def authorize(call: ToolCall, allowed: set[str, str] | None = None) -> tuple[dict[str, Any] | None, str]:
     # Returns (args, "") if the call may run, or (None, message_for_the_model).
     allowed = set() if allowed is None else allowed
     try:
         args = json.loads(call.arguments or "{}")
     except json.JSONDecodeError as e:
         return None, f"Error: the arguments were not valid JSON ({e})"
+    if not isinstance(args, dict):
+        return None, "Error: the arguments must be a JSON object."
 
     print(f"  [tool] {call.name}({args})")
     log.info("tool calls: %s %s", call.name, call.arguments[:200])
@@ -31,16 +33,23 @@ def authorize(call: ToolCall, allowed: set[str] | None = None) -> tuple[dict[str
     if call.name not in TOOL_FUNCTIONS:
         return None, f"Error: unknown tool '{call.name}'"
     
-    if call.name in NEEDS_APPROVAL and call.name not in allowed:
-        remember = call.name in REMEMBERABLE
-        choices = "y/n/a=always allow this session" if remember else "y/n"
-        answer = input(f"  allow {call.name} ({choices}) > ").strip().lower()
-        if answer == "a" and remember:
-            allowed.add(call.name)
-            log.info("user allowed %s for this session", call.name)
-        elif answer != "y":
-            log.info("user declined %s", call.name)
-            return None, DECLINED
+    if call.name in NEEDS_APPROVAL:
+        scope = SCOPES[call.name](args) if call.name in SCOPES else "*"
+        key = (call.name, scope)
+        if key not in allowed:
+            can_remember = call.name in REMEMBERABLE and scope != ""
+            if can_remember:
+                what = "this session" if scope == "*" else f"{scope} this session"
+                choices = f"y/n/a=always allow {what}"
+            else:
+                choices = "y/n"
+            answer = input(f"  allow {call.name}? ({choices}) > ").strip().lower()
+            if answer == "a" and can_remember:
+                allowed.add(key)
+                log.info("user allowed %s for %s this session", call.name, scope)
+            elif answer != "y":
+                log.info("user declined %s", call.name)
+                return None, DECLINED
     return args, ""
 
 async def execute(call: ToolCall, args: dict[str, Any]) -> str:
@@ -64,7 +73,7 @@ class Agent:
         self.summary: str = ""
         self.thinking_on: bool = settings.thinking_default
         self.parallel_tools: bool = settings.parallel_tools
-        self.allowed: set[str] = set()
+        self.allowed: set[tuple[str, str]] = set()
 
     async def request(self, **kwargs: Any):
         return await with_retries(

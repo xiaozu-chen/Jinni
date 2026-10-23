@@ -2,6 +2,7 @@ import ipaddress
 import socket
 from html.parser import HTMLParser
 from urllib.parse import urlparse
+from typing import Any
 
 import httpx
 
@@ -44,14 +45,25 @@ def check_public_url(url: str) -> None:
         if not ip.is_global:
             raise ValueError("that address is private or local, which is not allowed")
 
+def host_scope(args: dict[str, Any]) -> str:
+    try:
+        host = urlparse(str(args.get("url", ""))).hostname or ""
+    except ValueError:
+        return ""
+    return host.lower().rstrip(".").removeprefix("www.")
+
+
 
 @tool(
     description="Fetch a public web page and return its text. Only http and https URLs.",
     params={"url": "The full URL, starting with http:// or https://."},
     approval=True,
+    remember=True,
+    scope=host_scope,
 )
 def fetch_url(url: str) -> str:
     try:
+        origin = host_scope({"url": url})
         for _ in range(4):
             check_public_url(url)
             r = httpx.get(
@@ -61,6 +73,8 @@ def fetch_url(url: str) -> str:
             if not r.is_redirect:
                 break
             url = str(httpx.URL(url).join(r.headers["location"]))
+            if host_scope({"url": url}) != origin:
+                return f"Error: the page redirected to {url}, which is a different site. Call fetch_url again with that URL if you want it."
         else:
             return "Error: too many redirects."
 

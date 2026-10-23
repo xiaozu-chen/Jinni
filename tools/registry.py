@@ -7,12 +7,17 @@ TOOL_SCHEMAS: list[dict[str, Any]] = []
 NEEDS_APPROVAL: set[str] = set()
 REMEMBERABLE: set[str] = set()
 
+ScopeFn = Callable[[dict[str, Any]], str]
+SCOPES: dict[str, ScopeFn] = {}
+
 JSON_TYPES = {str: "string", int: "integer", float: "number", bool: "boolean"}
 
 
-def tool(description: str, params: dict[str, str] | None = None, approval: bool = False, remember: bool = False):
+def tool(description: str, params: dict[str, str] | None = None, approval: bool = False, remember: bool = False, scope: ScopeFn | None = None):
     if remember and not approval:
         raise ValueError("remember=True only makes sense together with approval=True")
+    if scope and not remember:
+        raise ValueError("scope only makes sense together with remember=True")
     params = params or {}
 
     def decorator(fn: Callable[..., str]) -> Callable[..., str]:
@@ -46,6 +51,9 @@ def tool(description: str, params: dict[str, str] | None = None, approval: bool 
 
         if remember:
             REMEMBERABLE.add(name)
+
+        if scope:
+            SCOPES[name] = scope
         return fn
 
     return decorator

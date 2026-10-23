@@ -7,7 +7,7 @@ from tools import NEEDS_APPROVAL, TOOL_FUNCTIONS, TOOL_SCHEMAS
 from tools import web
 from tools.basic import calculate
 from tools.files import MAX_READ, edit_file, list_files, read_file, write_file
-from tools.web import check_public_url, fetch_url
+from tools.web import check_public_url, fetch_url, host_scope
 from tools.workspace import safe_path
 
 @pytest.mark.parametrize("path", ["poem.txt", "notes/poem.txt", "notes/../mm.txt", "."])
@@ -130,3 +130,53 @@ def test_fetch_extracts_text(monkeypatch):
     assert "Hello" in result
     assert "bad()" not in result
     assert "untrusted" in result
+
+
+@pytest.mark.parametrize("url,expected", [
+    ("https://www.Mayoclinic.org/a", "mayoclinic.org"),
+    ("https://mayoclinic.org./a", "mayoclinic.org"),
+    ("https://good.example@evil.example/", "evil.example"),
+    ("https://user.github.io/x", "user.github.io"),
+    ("not a url", ""),
+    ("http://[bad", ""),
+])
+def test_host_scope(url, expected):
+    assert host_scope({"url": url}) == expected
+
+
+def test_cross_site_redirect_is_not_followed(monkeypatch):
+    calls = []
+
+    def fake_get(url, **kwargs):
+        calls.append(url)
+        return httpx.Response(
+            302, headers={"location": "https://evil.example/steal"},
+            request=httpx.Request("GET", url),
+        )
+
+    monkeypatch.setattr(web.httpx, "get", fake_get)
+    monkeypatch.setattr(web, "check_public_url", lambda url: None)
+
+    result = fetch_url("https://good.example/page")
+
+    assert result.startswith("Error")
+    assert "evil.example" in result
+    assert calls == ["https://good.example/page"]
+
+
+def test_same_site_redirect_is_followed(monkeypatch):
+    def fake_get(url, **kwargs):
+        if "www." not in url:
+            return httpx.Response(
+                301, headers={"location": "https://www.good.example/page"},
+                request=httpx.Request("GET", url),
+            )
+        return httpx.Response(
+            200, headers={"content-type": "text/plain"}, text="hello",
+            request=httpx.Request("GET", url),
+        )
+
+    monkeypatch.setattr(web.httpx, "get", fake_get)
+    monkeypatch.setattr(web, "check_public_url", lambda url: None)
+
+    assert "hello" in fetch_url("https://good.example/page")

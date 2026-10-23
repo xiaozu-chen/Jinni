@@ -11,6 +11,7 @@ def clean_registry(monkeypatch):
     monkeypatch.setattr(registry, "TOOL_SCHEMAS", [])
     monkeypatch.setattr(registry, "NEEDS_APPROVAL", set())
     monkeypatch.setattr(registry, "REMEMBERABLE", set())
+    monkeypatch.setattr(registry, "SCOPES", {})
 
 
 def test_schema_is_built_from_the_signature(clean_registry):
@@ -87,5 +88,17 @@ def test_remember_requires_approval(clean_registry):
             return ""
 
 
-def test_only_safe_tools_are_rememberable():
-    assert not ({"write_file", "edit_file", "fetch_url"} & tools.REMEMBERABLE)
+def test_writes_are_never_rememberable():
+    assert not ({"write_file", "edit_file"} & tools.REMEMBERABLE)
+
+
+def test_network_fetch_is_only_remembered_per_domain():
+    assert "fetch_url" in tools.REMEMBERABLE
+    assert "fetch_url" in tools.SCOPES
+
+
+def test_scope_requires_remember(clean_registry):
+    with pytest.raises(ValueError):
+        @tool(description="x", approval=True, scope=lambda args: "k")
+        def demo() -> str:
+            return ""

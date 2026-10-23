@@ -52,10 +52,17 @@ def main():
                     continue
                 if user_text == "/tools":
                     for name in TOOL_FUNCTIONS:
-                        note = ""
-                        if name in NEEDS_APPROVAL:
-                            note = "  (always allowed)" if name in agent.allowed else "  (asks first)"
-                            print(f"  {name}{note}")
+                        print(f"  {name}{'  (asks first)' if name in NEEDS_APPROVAL else ''}")
+                    continue
+                if user_text == "/allowed":
+                    if not agent.allowed:
+                        print("  (nothing is allowed without asking)")
+                    for name, scope in sorted(agent.allowed):
+                        print(f"  {name}: {'any use' if scope == '*' else scope}")
+                    continue
+                if user_text == "/revoke":
+                    agent.allowed.clear()
+                    print("  (all session permission revoked)")
                     continue
                 print("jinni > ", end="")
                 try:
