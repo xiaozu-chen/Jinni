@@ -4,3 +4,4 @@ workspace
 memory.txt
 .vscode
 jinni.log
+.pytest_cache
