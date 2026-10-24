@@ -1,9 +1,13 @@
 import math
+from collections.abc import Mapping, Sequence
 from html import escape
 from string import Template
 
 WIDTH, HEIGHT = 640, 360
 LEFT, RIGHT, TOP, BOTTOM = 76, 24, 24, 72
+MAX_SERIES = 8
+PIE_R = 130
+PIE_CX, PIE_CY = 190, HEIGHT // 2
 
 PAGE = """<!doctype html>
 <html lang="en">
@@ -13,21 +17,28 @@ PAGE = """<!doctype html>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>$title</title>
 <style>
-  :root { --bg:#ffffff; --fg:#1f2328; --muted:#6b7280; --grid:#e5e7eb; --accent:#2563eb; color-scheme: light dark; }
+  :root { --bg:#ffffff; --fg:#1f2328; --muted:#6b7280; --grid:#e5e7eb; color-scheme: light dark;
+    --c0:#2563eb; --c1:#d97706; --c2:#059669; --c3:#db2777; --c4:#7c3aed; --c5:#0891b2; --c6:#a16207; --c7:#64748b; }
   @media (prefers-color-scheme: dark) {
-    :root { --bg:#111418; --fg:#e6e8eb; --muted:#9aa4b2; --grid:#2a2f37; --accent:#60a5fa; }
+    :root { --bg:#111418; --fg:#e6e8eb; --muted:#9aa4b2; --grid:#2a2f37;
+      --c0:#60a5fa; --c1:#fbbf24; --c2:#34d399; --c3:#f472b6; --c4:#a78bfa; --c5:#22d3ee; --c6:#facc15; --c7:#94a3b8; }
   }
   body { margin:0; padding:24px; background:var(--bg); color:var(--fg); font-family: system-ui, "Segoe UI", sans-serif; }
   main { max-width: 760px; margin: 0 auto; }
   h1 { font-size: 1.25rem; font-weight: 600; margin: 0 0 4px; }
   p.sub { color: var(--muted); margin: 0 0 16px; font-size: .9rem; }
   svg { width: 100%; height: auto; }
+  .s0 { --c: var(--c0); } .s1 { --c: var(--c1); } .s2 { --c: var(--c2); } .s3 { --c: var(--c3); }
+  .s4 { --c: var(--c4); } .s5 { --c: var(--c5); } .s6 { --c: var(--c6); } .s7 { --c: var(--c7); }
   .grid { stroke: var(--grid); stroke-width: 1; }
   .axis { stroke: var(--muted); stroke-width: 1; }
   .tick, .xlabel, .axis-title { fill: var(--muted); font-size: 12px; }
   .value { fill: var(--fg); font-size: 11px; }
-  .bar, .dot { fill: var(--accent); }
-  .line { fill: none; stroke: var(--accent); stroke-width: 2.5; stroke-linejoin: round; }
+  .bar, .dot, .swatch, .slice { fill: var(--c); }
+  .slice { stroke: var(--bg); stroke-width: 2; }
+  .line { fill: none; stroke: var(--c); stroke-width: 2.5; stroke-linejoin: round; }
+  .legend { fill: var(--fg); font-size: 12px; }
+  .legend-value { fill: var(--muted); font-size: 12px; }
 </style>
 </head>
 <body>
@@ -66,6 +77,7 @@ def fmt(value: float) -> str:
 
 
 def compact(value: float) -> str:
+    """1500000000 -> '1.5B', 25000 -> '25K'. Small numbers fall back to fmt()."""
     sign = "-" if value < 0 else ""
     v = abs(value)
     for limit, suffix in ((1e12, "T"), (1e9, "B"), (1e6, "M"), (1e3, "K")):
@@ -75,22 +87,63 @@ def compact(value: float) -> str:
     return fmt(value)
 
 
-def _svg(kind: str, labels: list[str], values: list[float], title: str, x_title: str, y_title: str) -> str:
-    if not values or len(labels) != len(values):
-        raise ValueError("labels and values must be the same non-zero length")
+def _short(text: str, limit: int) -> str:
+    return text if len(text) <= limit else text[: limit - 1] + "…"
 
-    n = len(values)
+
+def _tip(label: str, name: str, value: float) -> str:
+    who = f" · {escape(name)}" if name else ""
+    return f"{escape(label)}{who}: {fmt(value)}"
+
+
+def _as_series(values: Sequence[float] | Mapping[str, Sequence[float]]) -> dict[str, list[float]]:
+    if isinstance(values, Mapping):
+        return {str(name): [float(v) for v in vs] for name, vs in values.items()}
+    return {"": [float(v) for v in values]}
+
+
+def _legend(names: list[str], width: float) -> tuple[list[str], int]:
+    """SVG pieces for a wrapping legend, and the height it needs."""
+    parts: list[str] = []
+    x, y = float(LEFT), 14
+    for i, name in enumerate(names):
+        label = _short(name, 20)
+        item_w = 18 + 7 * len(label) + 20
+        if x > LEFT and x + item_w > LEFT + width:
+            x, y = float(LEFT), y + 20
+        parts.append(f'<rect class="swatch s{i}" x="{x:.1f}" y="{y - 10}" width="12" height="12" rx="2"/>')
+        parts.append(f'<text class="legend" x="{x + 18:.1f}" y="{y}">{escape(label)}</text>')
+        x += item_w
+    return parts, y + 10
+
+
+def _xy_svg(kind: str, labels: Sequence[str], values: Sequence[float] | Mapping[str, Sequence[float]],
+            title: str, x_title: str, y_title: str) -> str:
+    series = _as_series(values)
+    labels = [str(label) for label in labels]
+    n, m = len(labels), len(series)
+    if n == 0 or m == 0 or m > MAX_SERIES or any(len(v) != n for v in series.values()):
+        raise ValueError("labels and values must be the same non-zero length, with at most 8 series")
+    names = list(series)
+
     plot_w = WIDTH - LEFT - RIGHT
-    plot_h = HEIGHT - TOP - BOTTOM
+    legend_parts: list[str] = []
+    top = TOP
+    if m > 1:
+        legend_parts, legend_h = _legend(names, plot_w)
+        top = max(TOP, legend_h)
+    plot_h = HEIGHT - top - BOTTOM
+
+    everything = [v for vs in series.values() for v in vs]
     if kind == "bar":
-        low, high = min(0.0, min(values)), max(0.0, max(values))
+        low, high = min(0.0, min(everything)), max(0.0, max(everything))
     else:
-        low, high = min(values), max(values)
+        low, high = min(everything), max(everything)
     ticks = nice_ticks(low, high)
     lo, hi = ticks[0], ticks[-1]
 
     def y_of(v: float) -> float:
-        return TOP + plot_h - (v - lo) / (hi - lo) * plot_h
+        return top + plot_h - (v - lo) / (hi - lo) * plot_h
 
     slot = plot_w / n
     centers = [LEFT + (i + 0.5) * slot for i in range(n)]
@@ -98,42 +151,48 @@ def _svg(kind: str, labels: list[str], values: list[float], title: str, x_title:
     parts = [
         f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {WIDTH} {HEIGHT}" role="img" aria-label="{escape(title)}">',
         f"<title>{escape(title)}</title>",
+        *legend_parts,
     ]
     for t in ticks:
         y = y_of(t)
         parts.append(f'<line class="grid" x1="{LEFT}" y1="{y:.1f}" x2="{WIDTH - RIGHT}" y2="{y:.1f}"/>')
         parts.append(f'<text class="tick" x="{LEFT - 8}" y="{y + 4:.1f}" text-anchor="end">{compact(t)}</text>')
-    parts.append(f'<line class="axis" x1="{LEFT}" y1="{TOP}" x2="{LEFT}" y2="{TOP + plot_h}"/>')
-    zero_y = y_of(0) if lo <= 0 <= hi else TOP + plot_h
+    parts.append(f'<line class="axis" x1="{LEFT}" y1="{top}" x2="{LEFT}" y2="{top + plot_h}"/>')
+    zero_y = y_of(0) if lo <= 0 <= hi else top + plot_h
     parts.append(f'<line class="axis" x1="{LEFT}" y1="{zero_y:.1f}" x2="{WIDTH - RIGHT}" y2="{zero_y:.1f}"/>')
 
     if kind == "bar":
-        bar_w = slot * 0.7
-        for c, label, v in zip(centers, labels, values):
-            top, bottom = sorted((y_of(v), y_of(0)))
-            parts.append(
-                f'<rect class="bar" x="{c - bar_w / 2:.1f}" y="{top:.1f}" width="{bar_w:.1f}" height="{bottom - top:.1f}">'
-                f"<title>{escape(label)}: {fmt(v)}</title></rect>"
-            )
+        group_w = slot * 0.8
+        bar_w = group_w / m
+        for j, name in enumerate(names):
+            for i, v in enumerate(series[name]):
+                x = LEFT + i * slot + (slot - group_w) / 2 + j * bar_w
+                y_top, y_bottom = sorted((y_of(v), y_of(0)))
+                parts.append(
+                    f'<rect class="bar s{j}" x="{x:.1f}" y="{y_top:.1f}" width="{max(bar_w - 1.5, 1):.1f}" '
+                    f'height="{y_bottom - y_top:.1f}"><title>{_tip(labels[i], name, v)}</title></rect>'
+                )
     else:
-        points = " ".join(f"{c:.1f},{y_of(v):.1f}" for c, v in zip(centers, values))
-        parts.append(f'<polyline class="line" points="{points}"/>')
-        for c, label, v in zip(centers, labels, values):
-            parts.append(
-                f'<circle class="dot" cx="{c:.1f}" cy="{y_of(v):.1f}" r="3.5">'
-                f"<title>{escape(label)}: {fmt(v)}</title></circle>"
-            )
+        for j, name in enumerate(names):
+            vals = series[name]
+            points = " ".join(f"{c:.1f},{y_of(v):.1f}" for c, v in zip(centers, vals))
+            parts.append(f'<polyline class="line s{j}" points="{points}"/>')
+            for c, label, v in zip(centers, labels, vals):
+                parts.append(
+                    f'<circle class="dot s{j}" cx="{c:.1f}" cy="{y_of(v):.1f}" r="3.5">'
+                    f"<title>{_tip(label, name, v)}</title></circle>"
+                )
 
-    if n <= 12:
-        for c, v in zip(centers, values):
+    if m == 1 and n <= 12:
+        for c, v in zip(centers, series[names[0]]):
             y = y_of(v) - 6 if v >= 0 else y_of(v) + 14
             parts.append(f'<text class="value" x="{c:.1f}" y="{y:.1f}" text-anchor="middle">{fmt(v)}</text>')
 
     rotate = n > 8
     limit = 10 if rotate else 14
-    label_y = TOP + plot_h + 18
+    label_y = top + plot_h + 18
     for c, label in zip(centers, labels):
-        short = label if len(label) <= limit else label[: limit - 1] + "…"
+        short = _short(label, limit)
         if rotate:
             parts.append(
                 f'<text class="xlabel" x="{c:.1f}" y="{label_y}" text-anchor="end" '
@@ -142,19 +201,69 @@ def _svg(kind: str, labels: list[str], values: list[float], title: str, x_title:
         else:
             parts.append(f'<text class="xlabel" x="{c:.1f}" y="{label_y}" text-anchor="middle">{escape(short)}</text>')
 
-    mid = TOP + plot_h / 2
-    parts.append(f'<text class="axis-title" x="{LEFT + plot_w / 2:.1f}" y="{HEIGHT - 8}" text-anchor="middle">{escape(x_title)}</text>')
-    parts.append(f'<text class="axis-title" x="14" y="{mid:.1f}" text-anchor="middle" transform="rotate(-90 14 {mid:.1f})">{escape(y_title)}</text>')
+    mid = top + plot_h / 2
+    parts.append(f'<text class="axis-title" x="{LEFT + plot_w / 2:.1f}" y="{HEIGHT - 8}" text-anchor="middle">{escape(_short(x_title, 40))}</text>')
+    parts.append(f'<text class="axis-title" x="14" y="{mid:.1f}" text-anchor="middle" transform="rotate(-90 14 {mid:.1f})">{escape(_short(y_title, 36))}</text>')
     parts.append("</svg>")
     return "\n".join(parts)
 
 
-def bar_chart(labels: list[str], values: list[float], title: str, x_title: str, y_title: str) -> str:
-    return _svg("bar", labels, values, title, x_title, y_title)
+def bar_chart(labels: Sequence[str], values: Sequence[float] | Mapping[str, Sequence[float]],
+              title: str, x_title: str, y_title: str) -> str:
+    return _xy_svg("bar", labels, values, title, x_title, y_title)
 
 
-def line_chart(labels: list[str], values: list[float], title: str, x_title: str, y_title: str) -> str:
-    return _svg("line", labels, values, title, x_title, y_title)
+def line_chart(labels: Sequence[str], values: Sequence[float] | Mapping[str, Sequence[float]],
+               title: str, x_title: str, y_title: str) -> str:
+    return _xy_svg("line", labels, values, title, x_title, y_title)
+
+
+def pie_chart(labels: Sequence[str], values: Sequence[float], title: str) -> str:
+    if not values or len(labels) != len(values):
+        raise ValueError("labels and values must be the same non-zero length")
+    nums = [float(v) for v in values]
+    if not all(math.isfinite(v) for v in nums):
+        raise ValueError("a pie chart needs finite numbers")
+    if any(v < 0 for v in nums) or not any(v > 0 for v in nums):
+        raise ValueError("a pie chart needs numbers that are zero or more, and at least one above zero")
+
+    items = sorted(((str(l), v) for l, v in zip(labels, nums) if v > 0), key=lambda item: -item[1])
+    if len(items) > MAX_SERIES:
+        rest = items[MAX_SERIES - 1:]
+        items = items[: MAX_SERIES - 1] + [("Other", sum(v for _, v in rest))]
+    total = sum(v for _, v in items)
+
+    parts = [
+        f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {WIDTH} {HEIGHT}" role="img" aria-label="{escape(title)}">',
+        f"<title>{escape(title)}</title>",
+    ]
+    if len(items) == 1:
+        label, v = items[0]
+        parts.append(
+            f'<circle class="slice s0" cx="{PIE_CX}" cy="{PIE_CY}" r="{PIE_R}">'
+            f"<title>{_tip(label, '', v)}</title></circle>"
+        )
+    else:
+        angle = -math.pi / 2
+        for i, (label, v) in enumerate(items):
+            end = angle + 2 * math.pi * v / total
+            x0, y0 = PIE_CX + PIE_R * math.cos(angle), PIE_CY + PIE_R * math.sin(angle)
+            x1, y1 = PIE_CX + PIE_R * math.cos(end), PIE_CY + PIE_R * math.sin(end)
+            large = 1 if end - angle > math.pi else 0
+            parts.append(
+                f'<path class="slice s{i}" d="M {PIE_CX} {PIE_CY} L {x0:.1f} {y0:.1f} '
+                f'A {PIE_R} {PIE_R} 0 {large} 1 {x1:.1f} {y1:.1f} Z">'
+                f"<title>{_tip(label, '', v)}</title></path>"
+            )
+            angle = end
+
+    for i, (label, v) in enumerate(items):
+        y = 64 + i * 26
+        parts.append(f'<rect class="swatch s{i}" x="370" y="{y - 10}" width="12" height="12" rx="2"/>')
+        parts.append(f'<text class="legend" x="388" y="{y}">{escape(_short(label, 22))}</text>')
+        parts.append(f'<text class="legend-value" x="{WIDTH - 24}" y="{y}" text-anchor="end">{100 * v / total:.1f}%</text>')
+    parts.append("</svg>")
+    return "\n".join(parts)
 
 
 def html_page(title: str, subtitle: str, svg: str) -> str:
