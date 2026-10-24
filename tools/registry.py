@@ -13,18 +13,48 @@ SCOPES: dict[str, ScopeFn] = {}
 JSON_TYPES = {str: "string", int: "integer", float: "number", bool: "boolean"}
 
 
-def tool(description: str, params: dict[str, str] | None = None, approval: bool = False, remember: bool = False, scope: ScopeFn | None = None):
+def add_tool(name: str, 
+             fn: Callable[..., Any], 
+             description: str, 
+             parameters: dict[str, Any], 
+             approval: bool = False, 
+             remember: bool = False) -> None:
+    #
+    if name in TOOL_FUNCTIONS:
+        raise ValueError(f"tool '{name}' is already registered")
+    TOOL_FUNCTIONS[name] = fn
+    TOOL_SCHEMAS.append({
+        "type": "function",
+        "function": {"name": name, "description": description, "parameters": parameters},
+    })
+    if approval:
+        NEEDS_APPROVAL.add(name)
+    if remember:
+        REMEMBERABLE.add(name)
+
+
+def remove_tool(name: str) -> None:
+    TOOL_FUNCTIONS.pop(name, None)
+    NEEDS_APPROVAL.discard(name)
+    REMEMBERABLE.discard(name)
+    SCOPES.pop(name, None)
+    TOOL_SCHEMAS[:] = [s for s in TOOL_SCHEMAS if s["function"]["name"] != name]
+
+
+def tool(description: str, 
+         params: dict[str, str] | None = None, 
+         approval: bool = False, 
+         remember: bool = False, 
+         scope: ScopeFn | None = None):
+    #
     if remember and not approval:
-        raise ValueError("remember=True only makes sense together with approval=True")
+        raise ValueError("remember=True only make sense together with approval=True")
     if scope and not remember:
         raise ValueError("scope only makes sense together with remember=True")
     params = params or {}
 
-    def decorator(fn: Callable[..., str]) -> Callable[..., str]:
+    def decorator(fn: Callable[..., Any]) -> Callable[..., Any]:
         name = fn.__name__
-        if name in TOOL_FUNCTIONS:
-            raise ValueError(f"tool '{name}' is already registered")
-
         properties: dict[str, Any] = {}
         required: list[str] = []
         for pname, p in inspect.signature(fn).parameters.items():
@@ -36,24 +66,15 @@ def tool(description: str, params: dict[str, str] | None = None, approval: bool 
             }
             if p.default is inspect.Parameter.empty:
                 required.append(pname)
-
         schema: dict[str, Any] = {"type": "object", "properties": properties}
         if required:
             schema["required"] = required
 
-        TOOL_FUNCTIONS[name] = fn
-        TOOL_SCHEMAS.append({
-            "type": "function",
-            "function": {"name": name, "description": description, "parameters": schema},
-        })
-        if approval:
-            NEEDS_APPROVAL.add(name)
-
-        if remember:
-            REMEMBERABLE.add(name)
-
+        add_tool(name, fn, description, schema, approval, remember)
         if scope:
             SCOPES[name] = scope
         return fn
 
     return decorator
+
+
