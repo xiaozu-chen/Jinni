@@ -43,6 +43,15 @@ class Settings:
     max_event_chars: int = 600
     recall_results: int = 5
 
+    # semantic recall (optional: needs the embedding server on its own port)
+    embed_enabled: bool = True
+    embed_url: str = "http://127.0.0.1:8081/v1"
+    embed_model: str = "nomic-embed-text-v1.5"
+    embed_query_prefix: str = "search_query: "
+    embed_doc_prefix: str = "search_document: "
+    embed_timeout: float = 15.0
+    min_similarity: float = 0.5
+
 
 settings = Settings()
 

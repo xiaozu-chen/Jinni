@@ -19,6 +19,12 @@ CREATE TABLE IF NOT EXISTS memories (
 );
 CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts
     USING fts5(text, tokenize = 'porter unicode61');
+CREATE TABLE IF NOT EXISTS embeddings (
+    memory_id INTEGER PRIMARY KEY,
+    model TEXT NOT NULL,
+    dim INTEGER NOT NULL,
+    vec BLOB NOT NULL
+);
 """
 
 
@@ -123,18 +129,54 @@ class MemoryStore:
             found = [self._get(i) for i in ids]
         return [m for m in found if m is not None]
 
+    def get(self, memory_id: int) -> Memory | None:
+        with self.lock:
+            return self._get(memory_id)
+
+    def pending(self, model: str, limit: int) -> list[Memory]:
+        with self.lock:
+            rows = self.conn.execute(
+                "SELECT m.id, m.kind, m.text, m.created FROM memories m "
+                "LEFT JOIN embeddings e ON e.memory_id = m.id AND e.model = ? "
+                "WHERE e.memory_id IS NULL ORDER BY m.id LIMIT ? ",
+                (model, limit),
+            ).fetchall()
+        return [Memory(*r) for r in rows]
+
+    def save_vector(self, memory_id: int, model: str, dim: int, blob: bytes) -> None:
+        with self.lock, self.conn:
+            if self._get(memory_id) is None:
+                return
+            self.conn.execute(
+                "INSERT OR REPLACE INTO embeddings (memory_id, model, dim, vec) VALUES (?, ?, ?, ?)",
+                (memory_id, model, dim, blob),
+            )
+
+    def load_vectors(self, model: str) -> list[tuple[int, int, bytes]]:
+        with self.lock:
+            rows = self.conn.execute(
+                "SELECT e.memory_id, e.dim, e.vec FROM embeddings e "
+                "JOIN memories m ON m.id = e.memory_id WHERE e.model = ?",
+                (model,),
+            ).fetchall()
+        return [(r[0], r[1], bytes(r[2])) for r in rows]
+
     def delete(self, memory_id: int) -> bool:
         memory_id = int(memory_id)
         with self.lock, self.conn:
             cur = self.conn.execute("DELETE FROM memories WHERE id = ?", (memory_id,))
             self.conn.execute("DELETE FROM memories_fts WHERE rowid = ?", (memory_id,))
+            self.conn.execute("DELETE FROM embeddings WHERE memory_id = ?", (memory_id,))
         return cur.rowcount > 0
 
     def clear(self) -> int:
         with self.lock, self.conn:
             cur = self.conn.execute("DELETE FROM memories")
             self.conn.execute("DELETE FROM memories_fts")
+            self.conn.execute("DELETE FROM embeddings")
         return cur.rowcount
+
+    
 
 
 @lru_cache(maxsize=1)

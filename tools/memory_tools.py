@@ -1,5 +1,6 @@
 import memory
 from memory import Rejected
+import semantic
 
 from .registry import tool
 
@@ -18,11 +19,11 @@ def remember(fact: str) -> str:
 
 
 @tool(
-    description="Search your long-term memory of past sessions. Use it when the user refers to somrthing from an earlier conversation that you cannot see in this one.",
-    params={"query": "A few keywords to look for, like 'mm.txt' or 'project deadline'."},
+    description="Search your long-term memory of past sessions, by keywords or by meaning. Use it when the user refers to something from an earlier conversation that you cannot see in this one.",
+    params={"query": "A few keywords or a short phrase describing what to look for, like 'mm.txt', or 'the user's pet'."},
 )
 def recall(query: str) -> str:
-    found = memory.get_store().search(query)
+    found, _mode = semantic.hybrid_search(memory.get_store(), query)
     if not found:
         return "Nothing found in memory."
     lines = [f"#{m.id} ({m.created}, {m.kind}): {m.text}" for m in found]

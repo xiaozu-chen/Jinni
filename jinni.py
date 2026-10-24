@@ -9,6 +9,7 @@ from agent import Agent
 from review import review
 from tools import LOAD_ERRORS, NEEDS_APPROVAL, TOOL_FUNCTIONS
 from tools.workspace import find_chart
+from semantic import EmbedError, catch_up, hybrid_search
 
 sys.stdout.reconfigure(encoding="utf-8")
 sys.stdin.reconfigure(encoding="utf-8")
@@ -93,6 +94,18 @@ def main() -> None:
                         print(f"  (opened {page.name})")
                     else:
                         print(f"  (could not open a browser. the file is at {page})")
+                    continue
+                if cmd == "/recall":
+                    found, mode = hybrid_search(agent.memory, arg.strip())
+                    print(f"  ({len(found)} result(s), {mode} search)")
+                    for m in found:
+                        print(f"  #{m.id} [{m.kind}] {m.text}")
+                    continue
+                if cmd == "/reindex":
+                    try:
+                        print(f"  ({catch_up(agent.memory)} memories embedded)")
+                    except EmbedError as e:
+                        print(f"  (embeddings server not reachable: {e})")
                     continue
                 print("jinni > ", end="")
                 try:

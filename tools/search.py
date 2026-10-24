@@ -1,4 +1,7 @@
-from ddgs import DDGS
+try:
+    from ddgs import DDGS
+except ModuleNotFoundError:  # optional dependency; keep plugin importable for discovery
+    DDGS = None
 
 from config import settings
 
@@ -14,6 +17,9 @@ MAX_RESULTS = 5
     remember=True,
 )
 def web_search(query: str) -> str:
+    if DDGS is None:
+        return "Error: the search backend is unavailable (install ddgs)."
+
     try:
         results = DDGS(timeout=10).text(
             query,
