@@ -10,6 +10,7 @@ from review import review
 from tools import LOAD_ERRORS, NEEDS_APPROVAL, TOOL_FUNCTIONS
 from tools.workspace import find_chart
 from semantic import EmbedError, catch_up, hybrid_search
+from mcp_client import McpManager
 
 sys.stdout.reconfigure(encoding="utf-8")
 sys.stdin.reconfigure(encoding="utf-8")
@@ -41,7 +42,6 @@ def main() -> None:
     for err in LOAD_ERRORS:
         log.warning("plugin skipped: %s", err)
         print(f"  (plugin skipped: {err})")
-    print(f"  ({len(TOOL_FUNCTIONS)} tools loaded)")
 
     agent = Agent()
     facts, notes = agent.memory.counts()
@@ -50,6 +50,11 @@ def main() -> None:
         print(f"  (memory: {facts} facts, {notes} session notes)")
 
     with asyncio.Runner() as runner:
+        manager = McpManager(settings.mcp_servers) if settings.mcp_enabled else None
+        if manager:
+            for line in runner.run(manager.start()):
+                print(line)
+        print(f"  ({len(TOOL_FUNCTIONS)} tools loaded)")
         try:
             while True:
                 user_text = input("you > ").strip()
@@ -107,6 +112,16 @@ def main() -> None:
                     except EmbedError as e:
                         print(f"  (embeddings server not reachable: {e})")
                     continue
+                if cmd == "/mcp":
+                    if manager is None:
+                        print("  (MCP is turned off in config.py)")
+                    elif arg.startswith("restart"):
+                        for line in runner.run(manager.restart(arg[len("restart"):].startswith())):
+                            print(line)
+                    else:
+                        for line in manager.status_lines():
+                            print(line)
+                    continue
                 print("jinni > ", end="")
                 try:
                     runner.run(agent.chat(user_text))
@@ -126,6 +141,12 @@ def main() -> None:
         except (Exception, KeyboardInterrupt) as e:
             log.exception("memory review failed")
             print(f"  (skipped the memory review: {type(e).__name__})")
+        if manager:
+            try:
+                runner.run(manager.stop())
+            except (Exception, KeyboardInterrupt) as e:
+                log.exception("MCP shutdown failed")
+                print(f"  (MCP shutdown problem: {type(e).__name__})")
 
 
 if __name__ == "__main__":
