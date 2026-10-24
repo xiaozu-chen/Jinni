@@ -1,5 +1,5 @@
 from .registry import tool
-from .workspace import safe_path
+from .workspace import mark_written, safe_path
 
 MAX_READ = 4000
 
@@ -44,6 +44,7 @@ def write_file(path: str, content: str) -> str:
         full = safe_path(path)
         full.parent.mkdir(parents=True, exist_ok=True)
         full.write_text(content, encoding="utf-8")
+        mark_written(full)
         return f"Wrote {len(content)} characters to {path}"
     except Exception as e:
         return f"Error: {e}"
@@ -70,6 +71,7 @@ def edit_file(path: str, old_text: str, new_text: str) -> str:
         if count > 1:
             return f"Error: old_text appears {count} times. Include more surrounding text so it matches once."
         full.write_text(text.replace(old_text, new_text, 1), encoding="utf-8")
+        mark_written(full)
         return f"Edited {path}: replaced 1 occurrence."
     except FileNotFoundError:
         return f"Error: '{path}' was not found in the workspace."

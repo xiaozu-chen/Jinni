@@ -78,3 +78,19 @@ def test_bad_input_is_rejected():
         svgcharts.bar_chart([], [], "T", "x", "y")
     with pytest.raises(ValueError):
         svgcharts.bar_chart(["a"], [1, 2], "T", "x", "y")
+
+
+@pytest.mark.parametrize("value,expected", [
+    (0, "0"), (999, "999"), (1000, "1K"), (1500, "1.5K"), (25_000, "25K"),
+    (1_450_000, "1.45M"), (1_500_000_000, "1.5B"), (-2_000_000, "-2M"),
+    (2_000_000_000_000, "2T"), (0.004, "0.004"),
+])
+def test_compact(value, expected):
+    assert svgcharts.compact(value) == expected
+
+
+def test_big_numbers_get_short_axis_labels():
+    root = parse(svgcharts.bar_chart(["a", "b"], [1_450_935_791, 233_740_000], "T", "x", "y"))
+    ticks = [t.text for t in root.findall(f".//{SVG}text") if t.get("class") == "tick"]
+    assert ticks
+    assert all(len(t) <= 6 for t in ticks)

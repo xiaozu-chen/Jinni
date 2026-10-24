@@ -65,6 +65,16 @@ def fmt(value: float) -> str:
     return f"{value:.3g}"
 
 
+def compact(value: float) -> str:
+    sign = "-" if value < 0 else ""
+    v = abs(value)
+    for limit, suffix in ((1e12, "T"), (1e9, "B"), (1e6, "M"), (1e3, "K")):
+        if v >= limit:
+            text = f"{v / limit:.2f}".rstrip("0").rstrip(".")
+            return f"{sign}{text}{suffix}"
+    return fmt(value)
+
+
 def _svg(kind: str, labels: list[str], values: list[float], title: str, x_title: str, y_title: str) -> str:
     if not values or len(labels) != len(values):
         raise ValueError("labels and values must be the same non-zero length")
@@ -92,7 +102,7 @@ def _svg(kind: str, labels: list[str], values: list[float], title: str, x_title:
     for t in ticks:
         y = y_of(t)
         parts.append(f'<line class="grid" x1="{LEFT}" y1="{y:.1f}" x2="{WIDTH - RIGHT}" y2="{y:.1f}"/>')
-        parts.append(f'<text class="tick" x="{LEFT - 8}" y="{y + 4:.1f}" text-anchor="end">{fmt(t)}</text>')
+        parts.append(f'<text class="tick" x="{LEFT - 8}" y="{y + 4:.1f}" text-anchor="end">{compact(t)}</text>')
     parts.append(f'<line class="axis" x1="{LEFT}" y1="{TOP}" x2="{LEFT}" y2="{TOP + plot_h}"/>')
     zero_y = y_of(0) if lo <= 0 <= hi else TOP + plot_h
     parts.append(f'<line class="axis" x1="{LEFT}" y1="{zero_y:.1f}" x2="{WIDTH - RIGHT}" y2="{zero_y:.1f}"/>')

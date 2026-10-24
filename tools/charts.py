@@ -6,7 +6,7 @@ import re
 import svgcharts
 
 from .registry import tool
-from .workspace import CHART_DIR, safe_path
+from .workspace import CHART_DIR, safe_path, was_written
 
 MAX_ROWS = 50
 MAX_CSV_BYTES = 200_000
@@ -57,19 +57,24 @@ def make_chart(file: str, x_column: str, y_column: str, kind: str = "bar", title
         source = safe_path(file)
         if source.stat().st_size > MAX_CSV_BYTES:
             return f"Error: '{file}' is too large to chart (limit {MAX_CSV_BYTES // 1000} KB)."
-        labels, values = load_series(source.read_text(encoding="utf-8-sig"), x_column, y_column)
+        labels, values = load_series(source.read_text
+        (encoding="utf-8-sig"), x_column, y_column)
+        typed_by_model = was_written(source)
 
         title = (title or f"{y_column} by {x_column}")[:120]
         slug = re.sub(r"[^A-Za-z0-9_-]+", "-", f"{source.stem}-{y_column}-{kind}").strip("-").lower()[:60] or "chart"
         draw = svgcharts.bar_chart if kind == "bar" else svgcharts.line_chart
-        page = svgcharts.html_page(
-            title, f"Source: {file} · {len(values)} rows", draw(labels, values, title, x_column, y_column)
-        )
+        subtitle = f"Source: {file} · {len(values)} rows"
+        if typed_by_model:
+            subtitle += " · typed by Jinni this session, numbers unverified"
+        page = svgcharts.html_page(title, subtitle, draw(labels, values, title, x_column, y_column))
 
         out = safe_path(f"{CHART_DIR}/{slug}.html")
         out.parent.mkdir(parents=True, exist_ok=True)
         out.write_text(page, encoding="utf-8")
-        return f"Saved the chart to {CHART_DIR}/{slug}.html ({len(values)} rows). Tell the user to type /open to view it."
+        note = " Note: this CSV was typed by Jinni itself this session, so tell the user its numbers are unverified." if typed_by_model else ""
+
+        return f"Saved the chart to {CHART_DIR}/{slug}.html ({len(values)} rows). Tell the user to type /open to view it. {note}"
     except FileNotFoundError:
         return f"Error: '{file}' was not found in the workspace."
     except Exception as e:

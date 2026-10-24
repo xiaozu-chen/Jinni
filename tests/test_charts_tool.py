@@ -3,6 +3,7 @@ import os
 import tools
 from tools.charts import make_chart
 from tools.workspace import find_chart
+from tools.files import write_file
 
 CSV = "month,sales,note\nJan,10,a\nFeb,25.5,b\nMar,-3,c\n"
 
@@ -84,3 +85,16 @@ def test_find_chart_returns_newest_or_named(workspace):
     assert find_chart() == new
     assert find_chart("old") == old
     assert find_chart("nope") is None
+
+
+def test_chart_of_a_file_the_model_wrote_is_flagged(workspace):
+    write_file("typed.csv", "k,v\na,1\nb,2\n")
+    result = make_chart("typed.csv", "k", "v")
+    page = (workspace / "charts" / "typed-v-bar.html").read_text(encoding="utf-8")
+    assert "unverified" in result
+    assert "unverified" in page
+
+
+def test_chart_of_a_user_file_is_not_flagged(workspace):
+    put(workspace, "mine.csv", "k,v\na,1\n")
+    assert "unverified" not in make_chart("mine.csv", "k", "v")

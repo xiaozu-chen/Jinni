@@ -2,6 +2,15 @@ from pathlib import Path
 
 WORKSPACE = Path("workspace").resolve()
 CHART_DIR = "charts"
+MODEL_WRITTEN: set[Path] = set()
+
+
+def mark_written(path: Path) -> None:
+    MODEL_WRITTEN.add(path)
+
+
+def was_written(path: Path) -> bool:
+    return path in MODEL_WRITTEN
 
 
 def safe_path(path: str) -> Path:
