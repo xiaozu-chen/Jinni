@@ -3,6 +3,19 @@ from pathlib import Path
 
 
 @dataclass(frozen=True)
+class McpServerConfig:
+    name: str
+    command: str
+    args: tuple[str, ...] = ()
+    env: tuple[tuple[str, str], ...] = ()
+    tools: tuple[str, ...] = ()         # allowlist: tools not listed here never reach the model
+    remember: tuple[str, ...] = ()      # allowlisted tools the user may "always allow" per session
+    call_timeout: float = 30.0
+    mode: str = "auto"                  # "legacy" pins the old protocol if a server misbehaves
+
+
+
+@dataclass(frozen=True)
 class Settings:
     # server
     base_url: str = "http://127.0.0.1:8080/v1"
@@ -51,6 +64,15 @@ class Settings:
     embed_doc_prefix: str = "search_document: "
     embed_timeout: float = 15.0
     min_similarity: float = 0.5
+
+    # MCP (optional: Jinni works without any of it)
+    mcp_enabled: bool = True
+    mcp_servers: tuple[McpServerConfig, ...] = (
+        McpServerConfig(name="ddgs", command="ddgs", args=("mcp",), tools=("search_text",)),
+    )
+    mcp_start_timeout: float = 20.0
+    mcp_stop_timeout: float = 5.0
+    mcp_result_chars: int = 3000
 
 
 settings = Settings()

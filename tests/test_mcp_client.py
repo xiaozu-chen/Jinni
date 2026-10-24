@@ -1,0 +1,161 @@
+import asyncio
+import inspect
+import sys
+from types import SimpleNamespace
+
+from config import McpServerConfig
+from mcp_client import (McpServer, build_parameters, find_command, format_result, plain,
+                        register_server_tools, shrink_schema, tool_name)
+from tools import registry
+
+SCHEMA = {"type": "object", "properties": {"q": {"type": "string", "description": "x" * 500}}}
+
+
+class FakeServer:
+    def __init__(self, tool_names, **cfg):
+        self.cfg = McpServerConfig(name="ddgs", command="ddgs", **cfg)
+        self.tools = [SimpleNamespace(name=n, description=f"{n} does things", input_schema=SCHEMA)
+                      for n in tool_names]
+        self.calls = []
+
+    async def call(self, tool, arguments):
+        self.calls.append((tool, arguments))
+        return "ok"
+
+
+def result(content=None, structured=None, is_error=False):
+    return SimpleNamespace(content=content or [], structured_content=structured, is_error=is_error)
+
+
+def text(value):
+    return SimpleNamespace(type="text", text=value)
+
+
+def test_shrink_truncates_descriptions_and_drops_titles():
+    schema = {"title": "Args", "type": "object",
+              "properties": {"q": {"type": "string", "title": "Q", "description": "x" * 500}}}
+    shrunk = shrink_schema(schema)
+    assert "title" not in shrunk
+    assert "title" not in shrunk["properties"]["q"]
+    assert len(shrunk["properties"]["q"]["description"]) == 160
+
+
+def test_shrink_keeps_parameters_named_like_keywords():
+    schema = {"type": "object", "properties": {
+        "title": {"type": "string", "description": "the title"},
+        "description": {"type": "string", "description": "the description"}}}
+    assert set(shrink_schema(schema)["properties"]) == {"title", "description"}
+
+
+def test_shrink_flattens_optional_types():
+    schema = {"type": "object", "properties": {"timelimit": {
+        "anyOf": [{"type": "string"}, {"type": "null"}], "default": None, "description": "d"}}}
+    assert shrink_schema(schema)["properties"]["timelimit"] == {"type": "string", "description": "d"}
+
+
+def test_non_object_schema_falls_back_to_no_parameters():
+    empty = {"type": "object", "properties": {}}
+    assert build_parameters(SimpleNamespace(input_schema={"type": "string"})) == empty
+    assert build_parameters(SimpleNamespace()) == empty
+
+
+def test_tool_names_are_sanitized():
+    assert tool_name("my server", "do/it!") == "my_server_do_it_"
+    assert len(tool_name("s" * 80, "t")) == 64
+
+
+def test_plain_removes_control_characters():
+    out = plain("\x1b[31mred\x1b[0m\nline")
+    assert "\x1b" not in out and "\n" not in out
+
+
+def test_find_command():
+    assert find_command(sys.executable) is not None
+    assert find_command("definitely-not-a-real-command") is None
+
+
+def test_results_are_labelled_as_data():
+    out = format_result(result([text("hello")]), "ddgs")
+    assert "hello" in out and "not instructions" in out and "ddgs" in out
+
+
+def test_error_results_start_with_error():
+    assert format_result(result([text("boom")], is_error=True), "s").startswith("Error: boom")
+
+
+def test_non_text_blocks_are_omitted():
+    out = format_result(result([SimpleNamespace(type="image", data="AAAA"), text("caption")]), "s")
+    assert "AAAA" not in out
+    assert "image content omitted" in out
+    assert "caption" in out
+
+
+def test_long_results_are_truncated():
+    out = format_result(result([text("x" * 100)]), "s", limit=10)
+    assert "[output truncated]" in out
+    assert "x" * 11 not in out
+
+
+def test_structured_content_is_the_fallback():
+    assert '"answer": 42' in format_result(result(structured={"answer": 42}), "s")
+
+
+def test_only_allowlisted_tools_are_exposed(clean_registry):
+    server = FakeServer(["search_text", "extract_content", "search_books"], tools=("search_text",))
+    reg = register_server_tools(server)
+    assert reg.exposed == ["ddgs_search_text"]
+    assert reg.hidden == ["extract_content", "search_books"]
+    assert list(registry.TOOL_FUNCTIONS) == ["ddgs_search_text"]
+    assert "ddgs_search_text" in registry.NEEDS_APPROVAL
+    assert "ddgs_search_text" not in registry.REMEMBERABLE
+
+
+def test_remember_is_opt_in(clean_registry):
+    server = FakeServer(["search_text"], tools=("search_text",), remember=("search_text",))
+    register_server_tools(server)
+    assert "ddgs_search_text" in registry.REMEMBERABLE
+
+
+def test_allowlisting_a_missing_tool_is_reported(clean_registry):
+    reg = register_server_tools(FakeServer(["search_text"], tools=("search_text", "typo_tool")))
+    assert reg.exposed == ["ddgs_search_text"]
+    assert any("typo_tool" in p for p in reg.problems)
+
+
+def test_name_collisions_are_skipped(clean_registry):
+    registry.add_tool("ddgs_search_text", lambda: "mine", "mine", {"type": "object", "properties": {}})
+    reg = register_server_tools(FakeServer(["search_text"], tools=("search_text",)))
+    assert reg.exposed == []
+    assert reg.problems
+    assert registry.TOOL_FUNCTIONS["ddgs_search_text"]() == "mine"
+
+
+def test_descriptions_are_labelled_and_capped(clean_registry):
+    register_server_tools(FakeServer(["search_text"], tools=("search_text",)))
+    function = registry.TOOL_SCHEMAS[0]["function"]
+    assert function["description"].startswith("[via MCP server 'ddgs']")
+    assert len(function["description"]) <= 300
+    assert len(function["parameters"]["properties"]["q"]["description"]) == 160
+
+
+def test_registered_tool_forwards_to_the_server(clean_registry):
+    server = FakeServer(["search_text"], tools=("search_text",))
+    register_server_tools(server)
+    fn = registry.TOOL_FUNCTIONS["ddgs_search_text"]
+
+    assert inspect.iscoroutinefunction(fn)
+    assert asyncio.run(fn(q="cats")) == "ok"
+    assert server.calls == [("search_text", {"q": "cats"})]
+
+
+def test_missing_sdk_fails_soft(monkeypatch):
+    monkeypatch.setitem(sys.modules, "mcp", None)
+    server = McpServer(McpServerConfig(name="t", command="whatever"))
+
+    async def scenario():
+        await server.start()
+        await server.stop()
+
+    asyncio.run(scenario())
+    assert server.state == "down"
+    assert "not installed" in server.error
