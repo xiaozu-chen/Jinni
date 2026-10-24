@@ -2,7 +2,7 @@ import pytest
 
 pytest.importorskip("ddgs")
 
-from tools import _search
+from tools import search
 
 
 def fake_ddgs(results=None, error=None):
@@ -20,8 +20,8 @@ def fake_ddgs(results=None, error=None):
 
 def test_search_formats_results(monkeypatch):
     results = [{"title": "Python", "href": "https://python.org", "body": "The language"}]
-    monkeypatch.setattr(_search, "DDGS", fake_ddgs(results))
-    out = _search.web_search("python")
+    monkeypatch.setattr(search, "DDGS", fake_ddgs(results))
+    out = search.web_search("python")
 
     assert "Python" in out
     assert "https://python.org" in out
@@ -29,10 +29,10 @@ def test_search_formats_results(monkeypatch):
 
 
 def test_search_no_results(monkeypatch):
-    monkeypatch.setattr(_search, "DDGS", fake_ddgs([]))
-    assert _search.web_search("zzz") == "No results found."
+    monkeypatch.setattr(search, "DDGS", fake_ddgs([]))
+    assert search.web_search("zzz") == "No results found."
 
 
 def test_search_failure_is_an_observation(monkeypatch):
-    monkeypatch.setattr(_search, "DDGS", fake_ddgs(error=RuntimeError("blocked")))
-    assert _search.web_search("python").startswith("Error")
+    monkeypatch.setattr(search, "DDGS", fake_ddgs(error=RuntimeError("blocked")))
+    assert search.web_search("python").startswith("Error")
