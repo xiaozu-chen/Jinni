@@ -7,6 +7,16 @@ import semantic
 from memory import MemoryStore
 from tools import workspace as ws
 from config import settings
+from tools import registry
+
+
+@pytest.fixture
+def clean_registry(monkeypatch):
+    monkeypatch.setattr(registry, "TOOL_FUNCTIONS", {})
+    monkeypatch.setattr(registry, "TOOL_SCHEMAS", [])
+    monkeypatch.setattr(registry, "NEEDS_APPROVAL", set())
+    monkeypatch.setattr(registry, "REMEMBERABLE", set())
+    monkeypatch.setattr(registry, "SCOPES", {})
 
 
 @pytest.fixture(autouse=True)

@@ -14,6 +14,7 @@ from retry import with_retries
 from tools import TOOL_FUNCTIONS, REMEMBERABLE, SCOPES, TOOL_SCHEMAS, NEEDS_APPROVAL
 import memory
 from memory import MemoryStore, Proposal, extraction_prompt, parse_proposals
+import inspect
 
 log = logging.getLogger("jinni.agent")
 RETRYABLE = (openai.APIConnectionError, openai.InternalServerError)
@@ -56,11 +57,15 @@ def authorize(call: ToolCall, allowed: set[str, str] | None = None) -> tuple[dic
 
 async def execute(call: ToolCall, args: dict[str, Any]) -> str:
     try:
-        result = str(await asyncio.to_thread(TOOL_FUNCTIONS[call.name], **args))
+        fn = TOOL_FUNCTIONS[call.name]
+        if inspect.iscoroutinefunction(fn):
+            result = str(await fn(**args))
+        else:
+            result = str(await asyncio.to_thread(fn, **args))
         log.info("tool result: %s -> %d chars: %r", call.name, len(result), result[:200])
         return result
     except Exception as e:
-        log.exception("tool %s faled", call.name)
+        log.exception("tool %s failed", call.name)
         return f"Error: {e}"
 
 class Agent:

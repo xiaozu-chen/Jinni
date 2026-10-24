@@ -214,3 +214,12 @@ def test_no_proposals_for_an_empty_session(monkeypatch):
 
     monkeypatch.setattr(Agent, "request", explode)
     assert asyncio.run(Agent().propose_memories()) == []
+
+def test_async_tools_are_awaited(monkeypatch):
+    async def greet(name: str) -> str:
+        return f"hi {name}"
+
+    monkeypatch.setitem(TOOL_FUNCTIONS, "greet", greet)
+    call = make_call("greet", {"name": "Carl"})
+    args, _ = authorize(call)
+    assert asyncio.run(execute(call, args)) == "hi Carl"

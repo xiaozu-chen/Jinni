@@ -5,13 +5,7 @@ from tools import registry
 from tools.registry import tool
 
 
-@pytest.fixture
-def clean_registry(monkeypatch):
-    monkeypatch.setattr(registry, "TOOL_FUNCTIONS", {})
-    monkeypatch.setattr(registry, "TOOL_SCHEMAS", [])
-    monkeypatch.setattr(registry, "NEEDS_APPROVAL", set())
-    monkeypatch.setattr(registry, "REMEMBERABLE", set())
-    monkeypatch.setattr(registry, "SCOPES", {})
+
 
 
 def test_schema_is_built_from_the_signature(clean_registry):
@@ -102,3 +96,33 @@ def test_scope_requires_remember(clean_registry):
         @tool(description="x", approval=True, scope=lambda args: "k")
         def demo() -> str:
             return ""
+
+
+def test_add_tool_registers_everywhere(clean_registry):
+    registry.add_tool("ext_demo", lambda: "x", "an external tool",
+                      {"type": "object", "properties": {}}, approval=True, remember=True)
+    assert "ext_demo" in registry.TOOL_FUNCTIONS
+    assert registry.TOOL_SCHEMAS[0]["function"]["name"] == "ext_demo"
+    assert "ext_demo" in registry.NEEDS_APPROVAL
+    assert "ext_demo" in registry.REMEMBERABLE
+
+
+def test_remove_tool_forgets_everything(clean_registry):
+    empty = {"type": "object", "properties": {}}
+    registry.add_tool("ext_demo", lambda: "x", "d", empty, approval=True, remember=True)
+    registry.add_tool("other", lambda: "y", "d", empty)
+
+    registry.remove_tool("ext_demo")
+    registry.remove_tool("ext_demo")   # removing twice is harmless
+
+    assert list(registry.TOOL_FUNCTIONS) == ["other"]
+    assert [s["function"]["name"] for s in registry.TOOL_SCHEMAS] == ["other"]
+    assert "ext_demo" not in registry.NEEDS_APPROVAL
+    assert "ext_demo" not in registry.REMEMBERABLE
+
+
+def test_add_tool_rejects_duplicates(clean_registry):
+    empty = {"type": "object", "properties": {}}
+    registry.add_tool("ext_demo", lambda: "x", "d", empty)
+    with pytest.raises(ValueError):
+        registry.add_tool("ext_demo", lambda: "y", "d", empty)
