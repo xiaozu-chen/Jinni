@@ -1,5 +1,6 @@
 import re
 import shutil
+import os
 from pathlib import Path
 
 SKIP_COPY_DIRS = {
@@ -9,8 +10,12 @@ SKIP_COPY_DIRS = {
 MAX_GUIDANCE_BYTES = 32_000
 
 
-def _ignore_generated(_directory: str, names: list[str]) -> set[str]:
-    return set(names) & SKIP_COPY_DIRS
+def _ignore_generated(directory: str, names: list[str]) -> set[str]:
+    base = Path(directory)
+    return {
+        name for name in names
+        if name in SKIP_COPY_DIRS or os.path.islink(base / name)
+    }
 
 
 def copy_project(source_path: str | Path, projects_dir: str | Path) -> Path:
@@ -28,7 +33,7 @@ def copy_project(source_path: str | Path, projects_dir: str | Path) -> Path:
 
     projects.mkdir(parents=True, exist_ok=True)
     try:
-        shutil.copytree(source, target, symlinks=True, ignore=_ignore_generated)
+        shutil.copytree(source, target, ignore=_ignore_generated)
     except (OSError, shutil.Error) as error:
         if target.exists():
             shutil.rmtree(target, ignore_errors=True)

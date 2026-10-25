@@ -21,6 +21,22 @@ def test_project_copy_keeps_original_and_skips_generated_data(tmp_path):
     assert not (copied / "venv").exists()
 
 
+def test_project_copy_skips_symlinks_to_keep_original_out_of_reach(tmp_path):
+    source = tmp_path / "source"
+    source.mkdir()
+    outside = tmp_path / "outside.txt"
+    outside.write_text("original", encoding="utf-8")
+    try:
+        (source / "linked.txt").symlink_to(outside)
+    except OSError:
+        pytest.skip("symbolic links are unavailable")
+
+    copied = copy_project(source, tmp_path / "workspace" / "projects")
+
+    assert not (copied / "linked.txt").exists()
+    assert outside.read_text(encoding="utf-8") == "original"
+
+
 def test_project_copy_refuses_an_existing_name_and_recursive_destination(tmp_path):
     source = tmp_path / "project"
     source.mkdir()
