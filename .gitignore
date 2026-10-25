@@ -10,3 +10,5 @@ docs
 mcp-*.log
 freeze-*.txt
 settings.toml
+build/
+*.egg-info/

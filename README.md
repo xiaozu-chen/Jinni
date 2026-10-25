@@ -30,6 +30,8 @@ Chart export commands save files beside the HTML chart:
 
 `fetch_table(url, table_index)` saves a public HTML table as a CSV and records the source URL, fetch time, and content hash in a provenance sidecar. Charts made from that CSV retain the source and date.
 
+CSV files created or edited with Jinni also get a hash-checked sidecar, so charts keep the "typed by Jinni, numbers unverified" notice after a restart.
+
 To bridge data from MCP, configure an allowlisted server tool that returns JSON with `columns` and `rows`, then use `/mcp-table <server> <tool> [JSON arguments]`. The repository includes a local sales fixture at `tests/fixtures/chart_data_server.py`; configure it in `mcp_servers.json` to try `/mcp-table fixture get_table {"dataset":"sales"}`. The file has a top-level `servers` list; each entry can set `name`, `command`, `args`, `env`, `tools`, `remember`, `call_timeout`, and `mode`. If the file is missing, Jinni uses the built-in settings; an invalid file is reported and ignored.
 
 MCP tool calls are checked against each server's advertised input schema before they are sent. Tools also must be explicitly allowlisted in `mcp_servers.json` or the built-in settings.

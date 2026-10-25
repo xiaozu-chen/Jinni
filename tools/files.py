@@ -8,6 +8,7 @@ from pathlib import Path
 
 from .registry import tool
 from . import workspace as workspace_tools
+from .provenance import write_typed_csv_provenance
 from .workspace import mark_written, safe_path
 
 MAX_READ = 4000
@@ -22,6 +23,17 @@ MAX_DEPTH = 10
 MAX_OUTPUT_CHARS = 12000
 SKIP_DIRS = {".git", ".venv", "venv", "__pycache__", "node_modules", ".pytest_cache", ".trash", ".jinni"}
 log = logging.getLogger("jinni.tools.files")
+
+
+def _mark_typed_csv(path: Path) -> str:
+    if path.suffix.lower() != ".csv":
+        return ""
+    try:
+        write_typed_csv_provenance(path, path.read_bytes())
+    except OSError:
+        log.exception("could not save typed-data provenance for %s", path.name)
+        return " (warning: its typed-data marker could not be saved)"
+    return ""
 
 
 def _workspace_entries(base: Path, max_depth: int = MAX_DEPTH):
@@ -314,7 +326,8 @@ def write_file(path: str, content: str) -> str:
         full.parent.mkdir(parents=True, exist_ok=True)
         full.write_text(content, encoding="utf-8")
         mark_written(full)
-        return f"Wrote {len(content)} characters to {path}"
+        marker_note = _mark_typed_csv(full)
+        return f"Wrote {len(content)} characters to {path}{marker_note}"
     except (OSError, UnicodeError, ValueError) as e:
         log.warning("write_file could not write %s: %s", path, e)
         return f"Error: {e}"
@@ -340,9 +353,11 @@ def edit_file(path: str, old_text: str, new_text: str) -> str:
             return "Error: old_text was not found. Read the file again and copy the text exactly."
         if count > 1:
             return f"Error: old_text appears {count} times. Include more surrounding text so it matches once."
-        full.write_text(text.replace(old_text, new_text, 1), encoding="utf-8")
+        updated = text.replace(old_text, new_text, 1)
+        full.write_text(updated, encoding="utf-8")
         mark_written(full)
-        return f"Edited {path}: replaced 1 occurrence."
+        marker_note = _mark_typed_csv(full)
+        return f"Edited {path}: replaced 1 occurrence.{marker_note}"
     except FileNotFoundError:
         return f"Error: '{path}' was not found in the workspace."
     except (OSError, UnicodeError, ValueError) as e:

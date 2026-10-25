@@ -1,3 +1,4 @@
+import re
 import xml.etree.ElementTree as ET
 
 import pytest
@@ -165,6 +166,13 @@ def test_narrow_bars_use_compact_value_labels():
 def test_series_palette_uses_okabe_ito_colors():
     expected = ("#0072b2", "#e69f00", "#009e73", "#d55e00", "#cc79a7", "#56b4e9", "#f0e442", "#000000")
     assert all(color in svgcharts.LIGHT_VARS for color in expected)
+
+
+def test_light_and_dark_series_palettes_have_no_duplicate_colors():
+    for palette in (svgcharts.LIGHT_VARS, svgcharts.DARK_VARS):
+        colors = re.findall(r"--c\d+:(#[0-9a-fA-F]{6})", palette)
+        assert len(colors) == 8
+        assert len(set(colors)) == len(colors)
 
 
 def test_a_long_legend_wraps_onto_more_rows():

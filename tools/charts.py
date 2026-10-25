@@ -188,7 +188,10 @@ def make_chart(file: str, x_column: str, y_column: str, kind: str = "bar", title
         series = {name: all_series[name] for name in y_columns}
         secondary = {name: all_series[name] for name in secondary_columns}
         provenance = read_csv_provenance(source) if source.suffix.lower() == ".csv" else None
-        typed_by_model = was_written(source) and provenance is None
+        typed_by_model = (
+            bool(provenance and provenance.get("kind") == "typed")
+            or (was_written(source) and provenance is None)
+        )
 
         names = ", ".join([*y_columns, *secondary_columns])
         title = (title or f"{names} by {x_column}")[:120]
@@ -204,13 +207,16 @@ def make_chart(file: str, x_column: str, y_column: str, kind: str = "bar", title
         else:
             svg = svgcharts.line_chart(labels, series, title, x_column, ", ".join(y_columns), secondary)
 
-        if provenance:
+        if provenance and provenance.get("kind") == "typed":
+            created = provenance["fetched_at"][:10]
+            subtitle = f"Source: typed by Jinni, recorded {created} · {len(labels)} rows"
+        elif provenance:
             fetched = provenance["fetched_at"][:10]
             subtitle = f"Source: {provenance['source_url']}, fetched {fetched} · {len(labels)} rows"
         else:
             subtitle = f"Source: {file} · {len(labels)} rows"
         if typed_by_model:
-            subtitle += " · typed by Jinni this session, numbers unverified"
+            subtitle += " · numbers unverified"
         page = svgcharts.html_page(title, subtitle, svg)
 
         out = safe_path(f"{CHART_DIR}/{slug}.html")
@@ -221,7 +227,7 @@ def make_chart(file: str, x_column: str, y_column: str, kind: str = "bar", title
             record_note = ""
         except OSError:
             record_note = " The integrity record could not be saved, so /open will use its structural check."
-        note = " Note: this data was typed by Jinni itself this session, so tell the user its numbers are unverified." if typed_by_model else ""
+        note = " Note: Jinni typed this data, so tell the user its numbers are unverified." if typed_by_model else ""
         return f"Saved the chart to {CHART_DIR}/{slug}.html ({len(labels)} rows). Tell the user to type /open to view it.{note}{record_note}"
     except FileNotFoundError:
         return f"Error: '{file}' was not found in the workspace."

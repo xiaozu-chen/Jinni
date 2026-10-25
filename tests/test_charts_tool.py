@@ -2,8 +2,10 @@ import os
 import zipfile
 
 import tools
+import tools.workspace as workspace_tools
 from chart_records import check_chart_record
 from tools.charts import make_chart
+from tools.provenance import read_csv_provenance
 from tools.workspace import find_chart
 from tools.files import write_file
 
@@ -24,6 +26,23 @@ def test_creates_a_bar_chart_page(workspace):
     chart_path = workspace / "charts" / "sales-sales-bar.html"
     assert check_chart_record(chart_path, page) is True
     assert check_chart_record(chart_path, page + " ") is False
+
+
+def test_typed_csv_warning_survives_a_restart(workspace, monkeypatch):
+    write_result = write_file("typed.csv", CSV)
+    assert write_result.startswith("Wrote")
+    csv_path = workspace / "typed.csv"
+    provenance = read_csv_provenance(csv_path)
+    assert provenance is not None
+    assert provenance["kind"] == "typed"
+    monkeypatch.setattr(workspace_tools, "MODEL_WRITTEN", set())
+
+    result = make_chart("typed.csv", "month", "sales")
+
+    page = next((workspace / "charts").glob("*.html")).read_text(encoding="utf-8")
+    assert result.startswith("Saved")
+    assert "typed by Jinni, recorded" in page
+    assert "numbers unverified" in page
 
 
 def test_creates_a_line_chart_page(workspace):
