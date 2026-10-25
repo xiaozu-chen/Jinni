@@ -6,7 +6,9 @@ import pytest
 
 import export_png
 import svgcharts
-from export_png import ExportError, build_command, export_chart, find_browser, png_size, render_png
+from export_png import (
+    ExportError, build_command, export_chart, find_browser, parse_export_options, png_size, render_png,
+)
 from tools.charts import make_chart
 
 MAGIC = b"\x89PNG\r\n\x1a\n"
@@ -83,6 +85,24 @@ def test_no_browser_found(monkeypatch):
     assert find_browser("") is None
 
 
+@pytest.mark.parametrize(("text", "expected"), [
+    ("", ("", None, None, None)),
+    ("dark", ("", "dark", None, None)),
+    ("sales dark 1920x1080", ("sales", "dark", 1920, 1080)),
+    ("1280x720 sales", ("sales", None, 1280, 720)),
+])
+def test_parse_png_options(text, expected):
+    assert parse_export_options(text) == expected
+
+
+@pytest.mark.parametrize("text", [
+    "dark light", "sales other", "800x600 1200x800", "319x720", "1280x4321", "12xwide",
+])
+def test_parse_png_options_rejects_invalid_values(text):
+    with pytest.raises(ValueError):
+        parse_export_options(text)
+
+
 def test_render_saves_a_verified_png(browser, tmp_path):
     out = tmp_path / "chart.png"
     width, height, size = render_png("<html></html>", out)
@@ -144,6 +164,28 @@ def test_export_chart_renders_a_forced_theme_and_saves_next_to_the_page(browser,
     assert "1280x720" in message
     assert "default-src 'none'" in browser.page_html
     assert svgcharts.LIGHT_VARS in browser.page_html.split("</style>")[0].rsplit(":root {", 1)[1]
+
+
+def test_export_chart_accepts_a_theme_and_custom_viewport(browser, workspace):
+    (workspace / "s.csv").write_text("m,v\na,1\nb,2\n", encoding="utf-8")
+    make_chart("s.csv", "m", "v")
+    page = workspace / "charts" / "s-v-bar.html"
+
+    message = export_chart(page, "dark", 1920, 1080)
+
+    assert "--window-size=1920,1080" in browser.command
+    assert svgcharts.DARK_VARS in browser.page_html.split("</style>")[0].rsplit(":root {", 1)[1]
+    assert "1280x720" in message
+
+
+def test_export_chart_rejects_an_invalid_custom_viewport(browser, workspace):
+    (workspace / "s.csv").write_text("m,v\na,1\nb,2\n", encoding="utf-8")
+    make_chart("s.csv", "m", "v")
+    page = workspace / "charts" / "s-v-bar.html"
+
+    with pytest.raises(ExportError, match="PNG size"):
+        export_chart(page, width=319, height=720)
+    assert browser.command == []
 
 
 def test_export_chart_refuses_a_tampered_chart(browser, workspace):

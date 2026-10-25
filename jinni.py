@@ -11,7 +11,7 @@ from tools import LOAD_ERRORS, NEEDS_APPROVAL, TOOL_FUNCTIONS
 from tools.workspace import find_chart
 from semantic import EmbedError, catch_up, hybrid_search
 from mcp_client import McpManager
-from export_png import ExportError, export_chart
+from export_png import ExportError, export_chart, parse_export_options
 from svgcharts import is_genuine_page
 
 sys.stdout.reconfigure(encoding="utf-8")
@@ -109,13 +109,14 @@ def main() -> None:
                         print(f"  (could not open a browser. the file is at {page})")
                     continue
                 if cmd == "/png":
-                    page = find_chart(arg.strip())
-                    if page is None:
-                        print("  (no chart found. ask Jinni to make one first)")
-                        continue
                     try:
-                        print(f"  ({export_chart(page)})")
-                    except ExportError as e:
+                        name, theme, width, height = parse_export_options(arg.strip())
+                        page = find_chart(name)
+                        if page is None:
+                            print("  (no chart found. ask Jinni to make one first)")
+                            continue
+                        print(f"  ({export_chart(page, theme, width, height)})")
+                    except (ExportError, ValueError) as e:
                         print(f"  (PNG export failed: {e})")
                     continue
 
