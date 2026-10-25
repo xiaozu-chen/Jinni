@@ -42,7 +42,7 @@ class FakeBrowser:
 def browser(monkeypatch):
     fake = FakeBrowser()
     monkeypatch.setattr(export_png, "find_browser", lambda configured="": "fake-browser")
-    monkeypatch.setattr(export_png.subprocess, "run", fake)
+    monkeypatch.setattr(export_png, "run_browser_command", lambda command, timeout: fake(command, timeout=timeout))
     return fake
 
 

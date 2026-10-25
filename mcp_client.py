@@ -239,6 +239,27 @@ class McpServer:
             return f"Error: lost the connection to MCP server '{clean(self.cfg.name)}'. The user can type /mcp restart."
         return format_result(result, self.cfg.name)
 
+    async def call_raw(self, tool: str, arguments: dict[str, Any]) -> Any:
+        """Call an allowlisted MCP tool and return its result for structured data handling."""
+        client = self.client
+        if self.state != "up" or client is None:
+            raise RuntimeError(f"the MCP server '{clean(self.cfg.name)}' is not running")
+        try:
+            result = await asyncio.wait_for(client.call_tool(tool, arguments), timeout=self.cfg.call_timeout)
+        except asyncio.TimeoutError:
+            raise RuntimeError(f"'{clean(tool)}' did not answer within {self.cfg.call_timeout:.0f} seconds") from None
+        except Exception as e:
+            if await self._alive(client):
+                detail = plain(getattr(e, "message", None) or type(e).__name__)
+                raise RuntimeError(f"the MCP call failed ({detail})") from e
+            self._mark_down(type(e).__name__)
+            raise RuntimeError(f"lost the connection to MCP server '{clean(self.cfg.name)}'") from e
+        if getattr(result, "is_error", False):
+            blocks = getattr(result, "content", None) or []
+            detail = "; ".join(plain(getattr(block, "text", "")) for block in blocks)
+            raise ValueError(detail or "the MCP tool returned an error")
+        return result
+
 
 class McpManager:
     def __init__(self, configs: tuple[McpServerConfig, ...]) -> None:

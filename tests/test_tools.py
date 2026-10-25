@@ -7,7 +7,8 @@ from tools import NEEDS_APPROVAL, TOOL_FUNCTIONS, TOOL_SCHEMAS
 from tools import web
 from tools.basic import calculate
 from tools.files import MAX_READ, edit_file, list_files, read_file, write_file
-from tools.web import check_public_url, fetch_url, host_scope
+from tools.web import check_public_url, fetch_table, fetch_url, host_scope
+from tools.provenance import read_csv_provenance
 from tools.workspace import safe_path
 
 @pytest.mark.parametrize("path", ["poem.txt", "notes/poem.txt", "notes/../mm.txt", "."])
@@ -130,6 +131,75 @@ def test_fetch_extracts_text(monkeypatch):
     assert "Hello" in result
     assert "bad()" not in result
     assert "untrusted" in result
+
+
+def test_fetch_table_saves_csv_and_hash_provenance(workspace, monkeypatch):
+    page = """<table><tr><th>Month</th><th>Sales</th></tr>
+        <tr><td>Jan</td><td>10</td></tr><tr><td>Feb</td><td>15</td></tr></table>"""
+    monkeypatch.setattr(web, "_fetch_html", lambda url: page)
+
+    result = fetch_table("https://example.com/reports/sales")
+
+    csv_path = workspace / "example-com-sales.csv"
+    assert "Saved table 0" in result
+    assert csv_path.read_text(encoding="utf-8") == "Month,Sales\nJan,10\nFeb,15\n"
+    record = read_csv_provenance(csv_path)
+    assert record["source_url"] == "https://example.com/reports/sales"
+    assert record["fetched_at"].startswith("20")
+    assert len(record["sha256"]) == 64
+
+
+def test_fetched_chart_displays_persisted_source_after_restart(workspace, monkeypatch):
+    page = "<table><tr><th>Month</th><th>Sales</th></tr><tr><td>Jan</td><td>10</td></tr></table>"
+    monkeypatch.setattr(web, "_fetch_html", lambda url: page)
+    result = fetch_table("https://example.com/reports/sales")
+    assert "unverified" not in result
+
+    from tools.charts import make_chart
+    chart_result = make_chart("example-com-sales.csv", "Month", "Sales")
+    chart_page = (workspace / "charts" / "example-com-sales-sales-bar.html").read_text(encoding="utf-8")
+
+    assert "https://example.com/reports/sales, fetched 20" in chart_page
+    assert "typed by Jinni" not in chart_page
+    assert chart_result.startswith("Saved")
+
+
+def test_fetch_table_selects_a_zero_based_table_and_rejects_duplicates():
+    html = "<table><tr><th>a</th></tr><tr><td>1</td></tr></table><table><tr><th>b</th></tr><tr><td>2</td></tr></table>"
+    assert web._table_csv(html, 1) == b"b\r\n2\r\n"
+    with pytest.raises(ValueError, match="unique"):
+        web._table_csv("<table><tr><th>x</th><th>x</th></tr><tr><td>1</td><td>2</td></tr></table>", 0)
+
+
+def test_fetch_table_blocks_cross_site_redirects(monkeypatch):
+    class Response:
+        is_redirect = True
+        headers = {"location": "https://evil.example/table"}
+
+    class Client:
+        def __init__(self, **kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def stream(self, method, url):
+            class Context:
+                def __enter__(self):
+                    return Response()
+
+                def __exit__(self, *args):
+                    return False
+
+            return Context()
+
+    monkeypatch.setattr(web.httpx, "Client", Client)
+    monkeypatch.setattr(web, "check_public_url", lambda url: None)
+    with pytest.raises(ValueError, match="different site"):
+        web._fetch_html("https://good.example/table")
 
 
 @pytest.mark.parametrize("url,expected", [

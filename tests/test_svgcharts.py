@@ -131,6 +131,42 @@ def test_series_length_mismatch_is_rejected():
         svgcharts.line_chart(["a", "b"], {"x": [1, 2], "y": [1]}, "T", "k", "v")
 
 
+def test_stacked_bars_stack_each_series_from_the_prior_total():
+    root = parse(svgcharts.stacked_bar_chart(["a", "b"], {"x": [2, -1], "y": [3, -4]}, "T", "k", "v"))
+    bars = rects_with(root, "bar")
+    assert len(bars) == 4
+    assert [b.find(f"{SVG}title").text for b in bars] == [
+        "a · x: 2", "b · x: -1", "a · y: 3", "b · y: -4",
+    ]
+
+
+def test_secondary_line_series_uses_a_right_axis():
+    root = parse(svgcharts.line_chart(
+        ["a", "b"], {"temperature": [10, 20]}, "T", "day", "°C", {"rain": [100, 200]}
+    ))
+    assert len(root.findall(f".//{SVG}polyline")) == 2
+    assert any(line.get("x1") == "560" and line.get("x2") == "560" for line in root.findall(f".//{SVG}line"))
+    assert "rain" in [text.text for text in root.findall(f".//{SVG}text")]
+
+
+def test_donut_chart_has_a_theme_colored_hole():
+    root = parse(svgcharts.donut_chart(["a", "b", "c"], [5, 3, 2], "T"))
+    holes = [circle for circle in root.findall(f".//{SVG}circle") if "hole" in circle.get("class", "")]
+    assert len(holes) == 1
+    assert ".hole { fill: var(--bg); }" in svgcharts.html_page("T", "S", svgcharts.donut_chart(["a", "b"], [1, 2], "T"))
+
+
+def test_narrow_bars_use_compact_value_labels():
+    svg = svgcharts.bar_chart([str(i) for i in range(12)], [1_450_000] * 12, "T", "x", "y")
+    assert '<text class="value"' in svg
+    assert ">1.45M</text>" in svg
+
+
+def test_series_palette_uses_okabe_ito_colors():
+    expected = ("#0072b2", "#e69f00", "#009e73", "#d55e00", "#cc79a7", "#56b4e9", "#f0e442", "#000000")
+    assert all(color in svgcharts.LIGHT_VARS for color in expected)
+
+
 def test_a_long_legend_wraps_onto_more_rows():
     names = {f"a fairly long series name {i}": [1, 2] for i in range(6)}
     root = parse(svgcharts.bar_chart(["a", "b"], names, "T", "k", "v"))

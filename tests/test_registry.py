@@ -53,12 +53,12 @@ def test_approval_flag_is_recorded(clean_registry):
 
 def test_real_tools_are_discovered():
     expected = {"get_current_time", "calculate", "list_files", "read_file",
-                "write_file", "edit_file", "fetch_url"}
+                "write_file", "edit_file", "fetch_url", "fetch_table"}
     assert expected <= set(tools.TOOL_FUNCTIONS)
 
 
 def test_dangerous_tools_require_approval():
-    assert {"write_file", "edit_file", "fetch_url"} <= tools.NEEDS_APPROVAL
+    assert {"write_file", "edit_file", "fetch_url", "fetch_table"} <= tools.NEEDS_APPROVAL
 
 
 def test_broken_plugin_is_skipped_not_fatal(monkeypatch):
@@ -89,6 +89,8 @@ def test_writes_are_never_rememberable():
 def test_network_fetch_is_only_remembered_per_domain():
     assert "fetch_url" in tools.REMEMBERABLE
     assert "fetch_url" in tools.SCOPES
+    assert "fetch_table" in tools.REMEMBERABLE
+    assert "fetch_table" in tools.SCOPES
 
 
 def test_scope_requires_remember(clean_registry):

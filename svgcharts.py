@@ -22,11 +22,11 @@ _SUB = re.compile(r'<p class="sub">(.*?)</p>', re.S)
 
 
 LIGHT_VARS = ("--bg:#ffffff; --fg:#1f2328; --muted:#6b7280; --grid:#e5e7eb; "
-              "--c0:#2563eb; --c1:#d97706; --c2:#059669; --c3:#db2777; "
-              "--c4:#7c3aed; --c5:#0891b2; --c6:#a16207; --c7:#64748b;")
+              "--c0:#0072b2; --c1:#e69f00; --c2:#009e73; --c3:#d55e00; "
+              "--c4:#cc79a7; --c5:#56b4e9; --c6:#f0e442; --c7:#000000;")
 DARK_VARS = ("--bg:#111418; --fg:#e6e8eb; --muted:#9aa4b2; --grid:#2a2f37; "
-             "--c0:#60a5fa; --c1:#fbbf24; --c2:#34d399; --c3:#f472b6; "
-             "--c4:#a78bfa; --c5:#22d3ee; --c6:#facc15; --c7:#94a3b8;")
+             "--c0:#56b4e9; --c1:#e69f00; --c2:#00b386; --c3:#ff7357; "
+             "--c4:#cc79a7; --c5:#56b4e9; --c6:#f0e442; --c7:#ffffff;")
 
 SVG_EXPORT_CSS = """\
 :root { $vars }
@@ -38,7 +38,12 @@ SVG_EXPORT_CSS = """\
 .value { fill: var(--fg); font-size: 11px; }
 .bar, .dot, .swatch, .slice { fill: var(--c); }
 .slice { stroke: var(--bg); stroke-width: 2; }
+.hole { fill: var(--bg); }
 .line { fill: none; stroke: var(--c); stroke-width: 2.5; stroke-linejoin: round; }
+.s1.line { stroke-dasharray: 6 3; } .s2.line { stroke-dasharray: 2 3; }
+.s3.line { stroke-dasharray: 8 2 2 2; } .s4.line { stroke-dasharray: 1 3; }
+.s5.line { stroke-dasharray: 10 3; } .s6.line { stroke-dasharray: 4 2 1 2; }
+.s7.line { stroke-dasharray: 5 1; }
 .legend { fill: var(--fg); font-size: 12px; }
 .legend-value { fill: var(--muted); font-size: 12px; }
 """
@@ -77,7 +82,12 @@ PAGE = """<!doctype html>
   .value { fill: var(--fg); font-size: 11px; }
   .bar, .dot, .swatch, .slice { fill: var(--c); }
   .slice { stroke: var(--bg); stroke-width: 2; }
+  .hole { fill: var(--bg); }
   .line { fill: none; stroke: var(--c); stroke-width: 2.5; stroke-linejoin: round; }
+  .s1.line { stroke-dasharray: 6 3; } .s2.line { stroke-dasharray: 2 3; }
+  .s3.line { stroke-dasharray: 8 2 2 2; } .s4.line { stroke-dasharray: 1 3; }
+  .s5.line { stroke-dasharray: 10 3; } .s6.line { stroke-dasharray: 4 2 1 2; }
+  .s7.line { stroke-dasharray: 5 1; }
   .legend { fill: var(--fg); font-size: 12px; }
   .legend-value { fill: var(--muted); font-size: 12px; }
 $extra</style>
@@ -160,15 +170,20 @@ def _legend(names: list[str], width: float) -> tuple[list[str], int]:
 
 
 def _xy_svg(kind: str, labels: Sequence[str], values: Sequence[float] | Mapping[str, Sequence[float]],
-            title: str, x_title: str, y_title: str) -> str:
+            title: str, x_title: str, y_title: str,
+            secondary_values: Mapping[str, Sequence[float]] | None = None,
+            stacked: bool = False) -> str:
     series = _as_series(values)
+    secondary = _as_series(secondary_values) if secondary_values else {}
     labels = [str(label) for label in labels]
-    n, m = len(labels), len(series)
-    if n == 0 or m == 0 or m > MAX_SERIES or any(len(v) != n for v in series.values()):
+    n, m = len(labels), len(series) + len(secondary)
+    if (n == 0 or m == 0 or m > MAX_SERIES or secondary and kind != "line"
+            or any(len(v) != n for v in [*series.values(), *secondary.values()])):
         raise ValueError("labels and values must be the same non-zero length, with at most 8 series")
-    names = list(series)
+    names = [*series, *secondary]
 
-    plot_w = WIDTH - LEFT - RIGHT
+    right_margin = RIGHT + (58 if secondary else 0)
+    plot_w = WIDTH - LEFT - right_margin
     legend_parts: list[str] = []
     top = TOP
     if m > 1:
@@ -176,16 +191,29 @@ def _xy_svg(kind: str, labels: Sequence[str], values: Sequence[float] | Mapping[
         top = max(TOP, legend_h)
     plot_h = HEIGHT - top - BOTTOM
 
-    everything = [v for vs in series.values() for v in vs]
-    if kind == "bar":
+    everything = [v for vs in [*series.values(), *secondary.values()] for v in vs]
+    if stacked:
+        positive = [sum(max(0, series[name][i]) for name in series) for i in range(n)]
+        negative = [sum(min(0, series[name][i]) for name in series) for i in range(n)]
+        low, high = min(0.0, min(negative)), max(0.0, max(positive))
+    elif kind == "bar":
         low, high = min(0.0, min(everything)), max(0.0, max(everything))
     else:
-        low, high = min(everything), max(everything)
+        primary_values = [v for vs in series.values() for v in vs]
+        low, high = min(primary_values), max(primary_values)
     ticks = nice_ticks(low, high)
     lo, hi = ticks[0], ticks[-1]
 
     def y_of(v: float) -> float:
         return top + plot_h - (v - lo) / (hi - lo) * plot_h
+
+    if secondary:
+        right_values = [v for vs in secondary.values() for v in vs]
+        right_ticks = nice_ticks(min(right_values), max(right_values))
+        right_lo, right_hi = right_ticks[0], right_ticks[-1]
+
+        def right_y_of(v: float) -> float:
+            return top + plot_h - (v - right_lo) / (right_hi - right_lo) * plot_h
 
     slot = plot_w / n
     centers = [LEFT + (i + 0.5) * slot for i in range(n)]
@@ -197,13 +225,37 @@ def _xy_svg(kind: str, labels: Sequence[str], values: Sequence[float] | Mapping[
     ]
     for t in ticks:
         y = y_of(t)
-        parts.append(f'<line class="grid" x1="{LEFT}" y1="{y:.1f}" x2="{WIDTH - RIGHT}" y2="{y:.1f}"/>')
+        parts.append(f'<line class="grid" x1="{LEFT}" y1="{y:.1f}" x2="{WIDTH - right_margin}" y2="{y:.1f}"/>')
         parts.append(f'<text class="tick" x="{LEFT - 8}" y="{y + 4:.1f}" text-anchor="end">{compact(t)}</text>')
+    if secondary:
+        axis_x = WIDTH - right_margin + 2
+        for t in right_ticks:
+            y = right_y_of(t)
+            parts.append(f'<text class="tick" x="{axis_x + 6}" y="{y + 4:.1f}">{compact(t)}</text>')
+        parts.append(f'<line class="axis" x1="{axis_x}" y1="{top}" x2="{axis_x}" y2="{top + plot_h}"/>')
     parts.append(f'<line class="axis" x1="{LEFT}" y1="{top}" x2="{LEFT}" y2="{top + plot_h}"/>')
     zero_y = y_of(0) if lo <= 0 <= hi else top + plot_h
-    parts.append(f'<line class="axis" x1="{LEFT}" y1="{zero_y:.1f}" x2="{WIDTH - RIGHT}" y2="{zero_y:.1f}"/>')
+    parts.append(f'<line class="axis" x1="{LEFT}" y1="{zero_y:.1f}" x2="{WIDTH - right_margin}" y2="{zero_y:.1f}"/>')
 
-    if kind == "bar":
+    if stacked:
+        group_w = slot * 0.8
+        positive = [0.0] * n
+        negative = [0.0] * n
+        for j, name in enumerate(names):
+            for i, v in enumerate(series[name]):
+                start = positive[i] if v >= 0 else negative[i]
+                end = start + v
+                if v >= 0:
+                    positive[i] = end
+                else:
+                    negative[i] = end
+                y_top, y_bottom = sorted((y_of(start), y_of(end)))
+                x = LEFT + i * slot + (slot - group_w) / 2
+                parts.append(
+                    f'<rect class="bar s{j}" x="{x:.1f}" y="{y_top:.1f}" width="{group_w:.1f}" '
+                    f'height="{y_bottom - y_top:.1f}"><title>{_tip(labels[i], name, v)}</title></rect>'
+                )
+    elif kind == "bar":
         group_w = slot * 0.8
         bar_w = group_w / m
         for j, name in enumerate(names):
@@ -216,19 +268,21 @@ def _xy_svg(kind: str, labels: Sequence[str], values: Sequence[float] | Mapping[
                 )
     else:
         for j, name in enumerate(names):
-            vals = series[name]
-            points = " ".join(f"{c:.1f},{y_of(v):.1f}" for c, v in zip(centers, vals))
+            vals = secondary[name] if name in secondary else series[name]
+            map_y = right_y_of if name in secondary else y_of
+            points = " ".join(f"{c:.1f},{map_y(v):.1f}" for c, v in zip(centers, vals))
             parts.append(f'<polyline class="line s{j}" points="{points}"/>')
             for c, label, v in zip(centers, labels, vals):
                 parts.append(
-                    f'<circle class="dot s{j}" cx="{c:.1f}" cy="{y_of(v):.1f}" r="3.5">'
+                    f'<circle class="dot s{j}" cx="{c:.1f}" cy="{map_y(v):.1f}" r="3.5">'
                     f"<title>{_tip(label, name, v)}</title></circle>"
                 )
 
-    if m == 1 and n <= 12:
+    if kind == "bar" and m == 1 and n <= 12:
         for c, v in zip(centers, series[names[0]]):
             y = y_of(v) - 6 if v >= 0 else y_of(v) + 14
-            parts.append(f'<text class="value" x="{c:.1f}" y="{y:.1f}" text-anchor="middle">{fmt(v)}</text>')
+            label = compact(v) if slot * 0.8 < 52 else fmt(v)
+            parts.append(f'<text class="value" x="{c:.1f}" y="{y:.1f}" text-anchor="middle">{label}</text>')
 
     rotate = n > 8
     limit = 10 if rotate else 14
@@ -246,6 +300,8 @@ def _xy_svg(kind: str, labels: Sequence[str], values: Sequence[float] | Mapping[
     mid = top + plot_h / 2
     parts.append(f'<text class="axis-title" x="{LEFT + plot_w / 2:.1f}" y="{HEIGHT - 8}" text-anchor="middle">{escape(_short(x_title, 40))}</text>')
     parts.append(f'<text class="axis-title" x="14" y="{mid:.1f}" text-anchor="middle" transform="rotate(-90 14 {mid:.1f})">{escape(_short(y_title, 36))}</text>')
+    if secondary:
+        parts.append(f'<text class="axis-title" x="{WIDTH - 10}" y="{mid:.1f}" text-anchor="middle" transform="rotate(90 {WIDTH - 10} {mid:.1f})">{escape(_short(", ".join(secondary), 36))}</text>')
     parts.append("</svg>")
     return "\n".join(parts)
 
@@ -256,11 +312,18 @@ def bar_chart(labels: Sequence[str], values: Sequence[float] | Mapping[str, Sequ
 
 
 def line_chart(labels: Sequence[str], values: Sequence[float] | Mapping[str, Sequence[float]],
-               title: str, x_title: str, y_title: str) -> str:
-    return _xy_svg("line", labels, values, title, x_title, y_title)
+               title: str, x_title: str, y_title: str,
+               secondary_values: Mapping[str, Sequence[float]] | None = None) -> str:
+    return _xy_svg("line", labels, values, title, x_title, y_title, secondary_values)
 
 
-def pie_chart(labels: Sequence[str], values: Sequence[float], title: str) -> str:
+def stacked_bar_chart(labels: Sequence[str], values: Mapping[str, Sequence[float]],
+                      title: str, x_title: str, y_title: str) -> str:
+    return _xy_svg("bar", labels, values, title, x_title, y_title, stacked=True)
+
+
+def pie_chart(labels: Sequence[str], values: Sequence[float], title: str,
+              donut: bool = False) -> str:
     if not values or len(labels) != len(values):
         raise ValueError("labels and values must be the same non-zero length")
     nums = [float(v) for v in values]
@@ -304,8 +367,14 @@ def pie_chart(labels: Sequence[str], values: Sequence[float], title: str) -> str
         parts.append(f'<rect class="swatch s{i}" x="370" y="{y - 10}" width="12" height="12" rx="2"/>')
         parts.append(f'<text class="legend" x="388" y="{y}">{escape(_short(label, 22))}</text>')
         parts.append(f'<text class="legend-value" x="{WIDTH - 24}" y="{y}" text-anchor="end">{100 * v / total:.1f}%</text>')
+    if donut:
+        parts.insert(2 + len(items), f'<circle class="hole" cx="{PIE_CX}" cy="{PIE_CY}" r="72"/>')
     parts.append("</svg>")
     return "\n".join(parts)
+
+
+def donut_chart(labels: Sequence[str], values: Sequence[float], title: str) -> str:
+    return pie_chart(labels, values, title, donut=True)
 
 
 def _extra_css(theme: str | None, export: bool) -> str:

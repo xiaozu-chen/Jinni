@@ -8,9 +8,11 @@ pytest.importorskip("mcp")
 
 from config import McpServerConfig
 from mcp_client import McpManager
+from mcp_data import export_mcp_table
 from tools import registry
 
 SERVER = str(Path(__file__).parent / "fixtures" / "echo_server.py")
+CHART_SERVER = str(Path(__file__).parent / "fixtures" / "chart_data_server.py")
 
 
 def config(**overrides):
@@ -79,5 +81,24 @@ def test_missing_command_fails_soft(clean_registry):
         assert "not found" in " ".join(lines)
         assert registry.TOOL_FUNCTIONS == {}
         await manager.stop()
+
+    asyncio.run(scenario())
+
+
+def test_local_chart_data_fixture_can_be_bridged_to_workspace(workspace):
+    async def scenario():
+        cfg = McpServerConfig(
+            name="fixture", command=sys.executable, args=(CHART_SERVER,),
+            tools=("get_table",),
+        )
+        manager = McpManager((cfg,))
+        await manager.start()
+        try:
+            result = await export_mcp_table(manager, "fixture", "get_table", {"dataset": "sales"})
+            assert "Saved MCP table" in result
+            csv_path = next(workspace.glob("fixture-get_table-sales-*.csv"))
+            assert "month,revenue,returns" in csv_path.read_text(encoding="utf-8")
+        finally:
+            await manager.stop()
 
     asyncio.run(scenario())

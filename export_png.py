@@ -9,6 +9,7 @@ import tempfile
 from pathlib import Path
 
 import svgcharts
+from browser_runtime import run_browser_command
 from config import settings
 
 log = logging.getLogger("jinni.png")
@@ -120,7 +121,7 @@ def render_png(page_html: str, out_path: Path, width: int | None = None,
                                 settings.png_scale)
         log.info("png export: %s", subprocess.list2cmdline(command))
         try:
-            run = subprocess.run(command, capture_output=True, timeout=settings.png_timeout, check=False)
+            run = run_browser_command(command, settings.png_timeout)
         except subprocess.TimeoutExpired:
             raise ExportError(f"the browser did not finish within {settings.png_timeout:.0f}s") from None
         except OSError as e:

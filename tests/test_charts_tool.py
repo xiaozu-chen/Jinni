@@ -1,4 +1,5 @@
 import os
+import zipfile
 
 import tools
 from tools.charts import make_chart
@@ -67,6 +68,47 @@ def test_missing_file(workspace):
 def test_csv_with_a_bom_works(workspace):
     (workspace / "excel.csv").write_bytes(b"\xef\xbb\xbf" + CSV.encode("utf-8"))
     assert make_chart("excel.csv", "month", "sales").startswith("Saved")
+
+
+def make_xlsx(path):
+    strings = ["month", "sales", "Jan", "Feb"]
+    shared = "".join(f'<si><t>{value}</t></si>' for value in strings)
+    sheet = (
+        '<row r="1"><c r="A1" t="s"><v>0</v></c><c r="B1" t="s"><v>1</v></c></row>'
+        '<row r="2"><c r="A2" t="s"><v>2</v></c><c r="B2"><v>10</v></c></row>'
+        '<row r="3"><c r="A3" t="s"><v>3</v></c><c r="B3"><v>15</v></c></row>'
+    )
+    with zipfile.ZipFile(path, "w") as book:
+        book.writestr("xl/workbook.xml", '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="Data" sheetId="1" r:id="rId1"/></sheets></workbook>')
+        book.writestr("xl/_rels/workbook.xml.rels", '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Target="worksheets/sheet1.xml" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet"/></Relationships>')
+        book.writestr("xl/sharedStrings.xml", f'<sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">{shared}</sst>')
+        book.writestr("xl/worksheets/sheet1.xml", f'<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>{sheet}</sheetData></worksheet>')
+
+
+def test_excel_xlsx_first_sheet_creates_a_chart(workspace):
+    make_xlsx(workspace / "sales.xlsx")
+
+    result = make_chart("sales.xlsx", "month", "sales")
+
+    assert result.startswith("Saved")
+    page = (workspace / "charts" / "sales-sales-bar.html").read_text(encoding="utf-8")
+    assert "Source: sales.xlsx · 2 rows" in page
+
+
+def test_old_xls_files_are_refused_with_a_conversion_hint(workspace):
+    (workspace / "sales.xls").write_bytes(b"legacy workbook")
+
+    assert "Older .xls" in make_chart("sales.xls", "month", "sales")
+
+
+def test_chart_tool_supports_stacked_donut_and_secondary_axis(workspace):
+    put(workspace, "data.csv", "month,a,b,c\nJan,10,20,100\nFeb,12,30,150\n")
+
+    assert make_chart("data.csv", "month", "a,b", "stacked").startswith("Saved")
+    assert make_chart("data.csv", "month", "a", "donut").startswith("Saved")
+    assert make_chart("data.csv", "month", "a", "line", secondary_y_column="c").startswith("Saved")
+    assert "class=\"hole\"" in (workspace / "charts" / "data-a-donut.html").read_text(encoding="utf-8")
+    assert "class=\"line s1\"" in (workspace / "charts" / "data-a-c-line.html").read_text(encoding="utf-8")
 
 
 def test_chart_tool_needs_approval_and_is_not_rememberable():

@@ -1,4 +1,5 @@
 import asyncio
+import json
 import sys
 import logging
 
@@ -13,6 +14,8 @@ from semantic import EmbedError, catch_up, hybrid_search
 from mcp_client import McpManager
 from export_png import ExportError, export_chart, parse_export_options
 from export_formats import export_pdf, export_svg
+from export_all import export_all
+from mcp_data import export_mcp_table
 from svgcharts import is_genuine_page
 
 sys.stdout.reconfigure(encoding="utf-8")
@@ -130,6 +133,27 @@ def main() -> None:
                         print(f"  ({result})")
                     except ExportError as e:
                         print(f"  ({cmd[1:].upper()} export failed: {e})")
+                    continue
+                if cmd == "/export-all":
+                    try:
+                        print(f"  ({export_all(arg.strip().lower() or 'all')})")
+                    except ValueError as e:
+                        print(f"  (export failed: {e})")
+                    continue
+                if cmd == "/mcp-table":
+                    if manager is None:
+                        print("  (MCP is turned off in config.py)")
+                        continue
+                    server_name, _, remaining = arg.strip().partition(" ")
+                    tool_name, _, raw_arguments = remaining.partition(" ")
+                    try:
+                        arguments = json.loads(raw_arguments) if raw_arguments.strip() else {}
+                        if not isinstance(arguments, dict):
+                            raise ValueError("arguments must be a JSON object")
+                        result = runner.run(export_mcp_table(manager, server_name, tool_name, arguments))
+                        print(f"  ({result})")
+                    except (ValueError, RuntimeError) as e:
+                        print(f"  (MCP table export failed: {e})")
                     continue
 
                 if cmd == "/recall":

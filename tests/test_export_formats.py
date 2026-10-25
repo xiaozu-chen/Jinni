@@ -43,7 +43,7 @@ def chart(workspace):
 def browser(monkeypatch):
     fake = FakeBrowser()
     monkeypatch.setattr(export_formats, "find_browser", lambda configured="": "fake-browser")
-    monkeypatch.setattr(export_formats.subprocess, "run", fake)
+    monkeypatch.setattr(export_formats, "run_browser_command", lambda command, timeout: fake(command, timeout=timeout))
     return fake
 
 
