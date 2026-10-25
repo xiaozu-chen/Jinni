@@ -50,6 +50,8 @@ Use `/memory facts`, `/memory events`, or `/memory search TEXT` to filter saved 
 
 Run `python bench_embed.py` with the configured embedding service running to compare related and unrelated similarity scores; it suggests a floor only when the sample ranges do not overlap.
 
+The initial `nomic-embed-text-v1.5.Q8_0.gguf` calibration on 2026-10-25 scored related pairs at 0.575, 0.561, and 0.550; unrelated pairs scored 0.418, 0.473, and 0.420. The highest unrelated score was 0.473 and the lowest related score was 0.550, so the midpoint floor is 0.512. `min_similarity` now uses that value; this small set is a starting check, not a broad relevance evaluation.
+
 ## CLI shortcuts
 
 Use `/help` for the command list, `/config` to inspect non-sensitive effective settings, `/stats` for session usage totals, `/save [NAME]` and `/load NAME` for bounded transcripts in `workspace/transcripts/`, and `/undo` to remove the latest chat turn from conversation history. `/undo` does not reverse file or other tool side effects.

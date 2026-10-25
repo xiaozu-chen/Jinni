@@ -70,7 +70,7 @@ class Settings:
         ("nomic-embed-text-v1.5", "search_query: ", "search_document: "),
     )
     embed_timeout: float = 15.0
-    min_similarity: float = 0.5
+    min_similarity: float = 0.512
 
     # MCP (optional: Jinni works without any of it)
     mcp_enabled: bool = True

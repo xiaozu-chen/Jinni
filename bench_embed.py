@@ -42,7 +42,7 @@ def main() -> None:
             document_vector = embed_texts([settings.embed_doc_prefix + document])[0]
             score = float(query_vector @ document_vector)
             (related_scores if label == "related" else unrelated_scores).append(score)
-            print(f"{score:5.2f}  {label:9}  {query!r}  vs  {document!r}")
+            print(f"{score:6.3f}  {label:9}  {query!r}  vs  {document!r}")
 
         texts = [settings.embed_doc_prefix + f"memory number {i}, some text about files" for i in range(32)]
         start = time.perf_counter()
