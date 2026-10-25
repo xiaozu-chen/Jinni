@@ -63,6 +63,9 @@ class Settings:
     embed_model: str = "nomic-embed-text-v1.5"
     embed_query_prefix: str = "search_query: "
     embed_doc_prefix: str = "search_document: "
+    embed_prefixes: tuple[tuple[str, str, str], ...] = (
+        ("nomic-embed-text-v1.5", "search_query: ", "search_document: "),
+    )
     embed_timeout: float = 15.0
     min_similarity: float = 0.5
 

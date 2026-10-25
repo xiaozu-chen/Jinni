@@ -12,7 +12,7 @@ from review import review, review_stale_facts
 from tools import LOAD_ERRORS, NEEDS_APPROVAL, TOOL_FUNCTIONS
 from tools.interaction import reset_tasks, task_list
 from tools.workspace import find_chart
-from semantic import EmbedError, catch_up, hybrid_search
+from semantic import EmbedError, catch_up, hybrid_search, start_warmup
 from mcp_client import McpManager
 from export_png import ExportError, export_chart, parse_export_options
 from export_formats import export_pdf, export_svg
@@ -146,6 +146,8 @@ def main() -> None:
         print(f"  (plugin skipped: {err})")
 
     agent = Agent()
+    if start_warmup(agent.memory):
+        print("  (warming semantic memory in the background)")
     facts, notes = agent.memory.counts()
     print("Jinni online. type 'exit' to leave.")
     if facts or notes:
