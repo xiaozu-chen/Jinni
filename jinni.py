@@ -10,7 +10,7 @@ from logger import setup_logging
 from agent import Agent
 from review import review, review_stale_facts
 from tools import LOAD_ERRORS, NEEDS_APPROVAL, TOOL_FUNCTIONS
-from tools.interaction import reset_tasks, task_list
+from tools.interaction import due_tasks, task_list
 from tools.workspace import find_chart
 from semantic import EmbedError, catch_up, hybrid_search, start_warmup
 from mcp_client import McpManager
@@ -21,6 +21,7 @@ from mcp_data import export_mcp_table
 from svgcharts import is_genuine_page
 from chart_records import check_chart_record, record_genuine_chart
 from audit import recent_calls
+from transcripts import load_transcript, save_transcript
 
 log = logging.getLogger("jinni.cli")
 
@@ -73,8 +74,10 @@ def help_text() -> str:
   /allowed, /revoke  inspect or clear session approvals
   /memory [FILTER]   browse memories by fact/event or search text
   /forget            remove saved memories
-  /tasks             show the session task list
+  /tasks             show the saved task list
   /stats             show session token, timing, and tool totals
+  /save [NAME]       save a bounded conversation transcript
+  /load NAME         load a transcript as context
   /prune DAYS        review and remove old session notes
   /audit [COUNT]     show recent approved tool calls
   /open [NAME]       open a chart
@@ -139,13 +142,16 @@ def main() -> None:
         if hasattr(stream, "reconfigure"):
             stream.reconfigure(encoding="utf-8")
     setup_logging()
-    reset_tasks()
     log.info("started, model=%s", settings.model)
     for err in LOAD_ERRORS:
         log.warning("plugin skipped: %s", err)
         print(f"  (plugin skipped: {err})")
 
     agent = Agent()
+    due = due_tasks()
+    if due != "(task list is empty)":
+        print("  Tasks due today or overdue:")
+        print(due)
     if start_warmup(agent.memory):
         print("  (warming semantic memory in the background)")
     facts, notes = agent.memory.counts()
@@ -206,6 +212,22 @@ def main() -> None:
                     continue
                 if cmd == "/stats":
                     print(stats_text(agent))
+                    continue
+                if cmd == "/save":
+                    name = arg.strip()
+                    result = save_transcript(agent, name)
+                    if "Confirm overwrite" in result:
+                        if input("  overwrite it? (y/n) > ").strip().lower() == "y":
+                            result = save_transcript(agent, name, overwrite=True)
+                        else:
+                            result = "(transcript kept)"
+                    print(f"  ({result})")
+                    continue
+                if cmd == "/load":
+                    if not arg.strip():
+                        print("  (usage: /load NAME)")
+                    else:
+                        print(f"  ({load_transcript(agent, arg.strip())})")
                     continue
                 if cmd == "/audit":
                     raw_count = arg.strip()

@@ -29,9 +29,9 @@ Use `/memory facts`, `/memory events`, or `/memory search TEXT` to filter saved 
 
 ## CLI shortcuts
 
-Use `/help` for the command list, `/config` to inspect non-sensitive effective settings, `/stats` for session usage totals, and `/undo` to remove the latest chat turn from conversation history. `/undo` does not reverse file or other tool side effects.
+Use `/help` for the command list, `/config` to inspect non-sensitive effective settings, `/stats` for session usage totals, `/save [NAME]` and `/load NAME` for bounded transcripts in `workspace/transcripts/`, and `/undo` to remove the latest chat turn from conversation history. `/undo` does not reverse file or other tool side effects.
 
-During a chat, Jinni can ask a clarifying question and keep a session task list with `task_list` actions `list`, `add`, `done`, `remove`, and `clear`; `/tasks` displays it. At the configured step limit, it asks before continuing another block of tool calls.
+During a chat, Jinni can ask a clarifying question and keep a SQLite-backed task list with `task_list` actions `list`, `due`, `add`, `done`, `remove`, and `clear`; added tasks can have an ISO due date, `/tasks` displays the list, and overdue tasks appear at startup. Clearing the list asks for confirmation. At the configured step limit, Jinni asks before continuing another block of tool calls.
 
 ## Project inspection tools
 

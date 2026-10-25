@@ -4,6 +4,7 @@ from dataclasses import dataclass, replace
 
 import memory
 import semantic
+import task_store as tasks_db
 from memory import MemoryStore
 from tools import workspace as ws
 from config import settings
@@ -31,6 +32,13 @@ def workspace(tmp_path, monkeypatch):
     monkeypatch.setattr(ws, "WORKSPACE", tmp_path.resolve())
     monkeypatch.setattr(ws, "MODEL_WRITTEN", set())
     return tmp_path.resolve()
+
+
+@pytest.fixture(autouse=True)
+def task_store(monkeypatch):
+    store = tasks_db.TaskStore(":memory:")
+    monkeypatch.setattr(tasks_db, "get_store", lambda: store)
+    return store
 
 
 @pytest.fixture(autouse=True)

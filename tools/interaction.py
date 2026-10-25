@@ -1,12 +1,7 @@
-from threading import RLock
-
 from .registry import tool
+import task_store
+from task_store import TaskStore
 
-MAX_TASKS = 50
-MAX_TASK_CHARS = 200
-_tasks: list[dict[str, object]] = []
-_next_id = 1
-_task_lock = RLock()
 
 
 @tool(
@@ -31,52 +26,50 @@ def ask_user(question: str, choices: str = "") -> str:
     return answer or "The user left the answer blank."
 
 
+def _format_tasks(tasks) -> str:
+    if not tasks:
+        return "(task list is empty)"
+    return "\n".join(
+        f"{'[x]' if item.completed else '[ ]'} #{item.id} {item.text}"
+        + (f" (due {item.due_date})" if item.due_date else "")
+        for item in tasks
+    )
+
+
+def due_tasks(store: TaskStore | None = None) -> str:
+    return _format_tasks((store or task_store.get_store()).due())
+
+
 @tool(
-    description="Manage a small session task list: list, add, complete, remove, or clear tasks.",
+    description="Manage a persistent task list: list, show due tasks, add, complete, remove, or clear tasks.",
     params={
-        "action": "One of list, add, done, remove, or clear.",
+        "action": "One of list, due, add, done, remove, or clear.",
         "task": "Task text for add, or unused for other actions.",
         "task_id": "Task number for done or remove.",
+        "due_date": "Optional due date for add in YYYY-MM-DD format.",
     },
 )
-def task_list(action: str, task: str = "", task_id: int = 0) -> str:
-    global _next_id
-    with _task_lock:
-        if action == "list":
-            if not _tasks:
-                return "(task list is empty)"
-            return "\n".join(
-                f"{'[x]' if item['done'] else '[ ]'} #{item['id']} {item['text']}"
-                for item in _tasks
-            )
-        if action == "add":
-            clean = task.strip()
-            if not clean or len(clean) > MAX_TASK_CHARS:
-                return f"Error: task text must contain 1 to {MAX_TASK_CHARS} characters."
-            if len(_tasks) >= MAX_TASKS:
-                return f"Error: the session task list is limited to {MAX_TASKS} items."
-            item = {"id": _next_id, "text": clean, "done": False}
-            _tasks.append(item)
-            _next_id += 1
-            return f"Added task #{item['id']}: {clean}"
-        if action in ("done", "remove"):
-            item = next((entry for entry in _tasks if entry["id"] == task_id), None)
-            if item is None:
-                return f"Error: there is no task #{task_id}."
-            if action == "done":
-                item["done"] = True
-                return f"Completed task #{task_id}: {item['text']}"
-            _tasks.remove(item)
-            return f"Removed task #{task_id}."
-        if action == "clear":
-            count = len(_tasks)
-            _tasks.clear()
-            return f"Cleared {count} session task(s)."
-        return "Error: action must be list, add, done, remove, or clear."
-
-
-def reset_tasks() -> None:
-    global _next_id
-    with _task_lock:
-        _tasks.clear()
-        _next_id = 1
+def task_list(action: str, task: str = "", task_id: int = 0, due_date: str = "") -> str:
+    store = task_store.get_store()
+    if action == "list":
+        return _format_tasks(store.list())
+    if action == "due":
+        return due_tasks(store)
+    if action == "add":
+        try:
+            item = store.add(task, due_date)
+        except ValueError as error:
+            return f"Error: {error}."
+        suffix = f" (due {item.due_date})" if item.due_date else ""
+        return f"Added task #{item.id}: {item.text}{suffix}"
+    if action in ("done", "complete"):
+        if store.mark_done(task_id):
+            return f"Completed task #{task_id}."
+        return f"Error: there is no open task #{task_id}."
+    if action == "remove":
+        return f"Removed task #{task_id}." if store.remove(task_id) else f"Error: there is no task #{task_id}."
+    if action == "clear":
+        if input("  Clear the whole task list? (y/n) > ").strip().lower() != "y":
+            return "(task list kept)"
+        return f"Cleared {store.clear()} task(s)."
+    return "Error: action must be list, due, add, done, remove, or clear."
