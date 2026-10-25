@@ -102,3 +102,37 @@ def test_local_chart_data_fixture_can_be_bridged_to_workspace(workspace):
             await manager.stop()
 
     asyncio.run(scenario())
+
+
+def test_jinni_read_only_server_exposes_fixed_tools_over_stdio(tmp_path):
+    project = Path(__file__).resolve().parents[1]
+    server_root = tmp_path / "server-root"
+    workspace = server_root / "workspace"
+    workspace.mkdir(parents=True)
+    (workspace / "note.txt").write_text("from the test workspace", encoding="utf-8")
+    runner = tmp_path / "run_jinni_mcp.py"
+    runner.write_text(
+        "import os, sys\n"
+        f"os.chdir({str(server_root)!r})\n"
+        f"sys.path.insert(0, {str(project)!r})\n"
+        "from mcp_server import main\n"
+        "main()\n",
+        encoding="utf-8",
+    )
+
+    async def scenario():
+        allowed = ("list_files", "read_file", "recall")
+        manager = McpManager((McpServerConfig(
+            name="jinni", command=sys.executable, args=(str(runner),), tools=allowed,
+        ),))
+        await manager.start()
+        try:
+            server = manager.servers["jinni"]
+            assert server.state == "up"
+            assert {tool.name for tool in server.tools} == set(allowed)
+            result = await server.call_raw("read_file", {"path": "note.txt"})
+            assert "from the test workspace" in result.content[0].text
+        finally:
+            await manager.stop()
+
+    asyncio.run(scenario())

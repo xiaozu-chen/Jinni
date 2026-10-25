@@ -22,3 +22,7 @@ To bridge data from MCP, configure an allowlisted server tool that returns JSON 
 ## Memory maintenance
 
 During the exit review, Jinni flags facts that look similar to saved facts so you can decide whether to keep both or skip the new one. Use `/prune DAYS` to review session notes older than that many days; Jinni shows a preview and asks before deleting. Saved facts are not pruned.
+
+## Read-only MCP server
+
+Run `python mcp_server.py` from the project directory as an MCP stdio server. It exposes only `list_files`, `read_file`, and `recall`; file access stays inside the workspace. It has no write, web, or delete tools.
