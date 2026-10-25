@@ -1,5 +1,8 @@
-from dataclasses import dataclass
+import os
+import tomllib
+from dataclasses import dataclass, fields
 from pathlib import Path
+from typing import Any
 
 
 @dataclass(frozen=True)
@@ -89,7 +92,95 @@ class Settings:
     png_headless_flag: str = "--headless=new"
 
 
-settings = Settings()
+def load_settings(path: str | Path | None = None) -> Settings:
+    config_path = Path(path or os.environ.get("JINNI_SETTINGS", "settings.toml"))
+    if not config_path.exists():
+        return Settings()
+
+    with config_path.open("rb") as stream:
+        values = tomllib.load(stream)
+    if not isinstance(values, dict):
+        raise ValueError("settings TOML must contain a table")
+
+    known = {item.name for item in fields(Settings)}
+    unknown = set(values) - known
+    if unknown:
+        raise ValueError(f"unknown settings: {', '.join(sorted(unknown))}")
+
+    defaults = Settings()
+    parsed: dict[str, Any] = {}
+    for name, value in values.items():
+        default = getattr(defaults, name)
+        if isinstance(default, Path):
+            if not isinstance(value, str):
+                raise ValueError(f"{name} must be a path string")
+            parsed[name] = Path(value)
+        elif isinstance(default, bool):
+            if not isinstance(value, bool):
+                raise ValueError(f"{name} must be true or false")
+            parsed[name] = value
+        elif isinstance(default, int):
+            if not isinstance(value, int) or isinstance(value, bool):
+                raise ValueError(f"{name} must be an integer")
+            parsed[name] = value
+        elif isinstance(default, float):
+            if not isinstance(value, (int, float)) or isinstance(value, bool):
+                raise ValueError(f"{name} must be a number")
+            parsed[name] = float(value)
+        elif isinstance(default, str):
+            if not isinstance(value, str):
+                raise ValueError(f"{name} must be a string")
+            parsed[name] = value
+        elif name == "embed_prefixes":
+            if (not isinstance(value, list) or any(
+                not isinstance(item, list) or len(item) != 3
+                or any(not isinstance(part, str) for part in item)
+                for item in value
+            )):
+                raise ValueError("embed_prefixes must be arrays of three strings")
+            parsed[name] = tuple(tuple(item) for item in value)
+        elif name == "mcp_servers":
+            if not isinstance(value, list) or any(not isinstance(item, dict) for item in value):
+                raise ValueError("mcp_servers must be an array of tables")
+            parsed[name] = tuple(_parse_mcp_server(item) for item in value)
+        else:
+            raise ValueError(f"unsupported setting type: {name}")
+
+    return Settings(**parsed)
+
+
+def _parse_mcp_server(value: dict[str, Any]) -> McpServerConfig:
+    known = {item.name for item in fields(McpServerConfig)}
+    unknown = set(value) - known
+    if unknown:
+        raise ValueError(f"unknown MCP server fields: {', '.join(sorted(unknown))}")
+    data = dict(value)
+    for name in ("args", "tools", "remember"):
+        if name in data:
+            items = data[name]
+            if not isinstance(items, list) or any(not isinstance(item, str) for item in items):
+                raise ValueError(f"MCP server {name} must be an array of strings")
+            data[name] = tuple(items)
+    if "env" in data:
+        env = data["env"]
+        if not isinstance(env, dict) or any(
+            not isinstance(key, str) or not isinstance(item, str)
+            for key, item in env.items()
+        ):
+            raise ValueError("MCP server env must be a table of strings")
+        data["env"] = tuple(sorted(env.items()))
+    for name in ("name", "command", "mode"):
+        if name in data and not isinstance(data[name], str):
+            raise ValueError(f"MCP server {name} must be a string")
+    if "call_timeout" in data and (
+        not isinstance(data["call_timeout"], (int, float))
+        or isinstance(data["call_timeout"], bool)
+    ):
+        raise ValueError("MCP server call_timeout must be a number")
+    return McpServerConfig(**data)
+
+
+settings = load_settings()
 
 # terminal colors
 GRAY = "\033[90m"

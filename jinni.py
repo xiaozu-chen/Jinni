@@ -139,11 +139,23 @@ def stats_text(agent: Agent) -> str:
         lines.append("  (none)")
     return "\n".join(lines)
 
+
+def enable_input_history() -> bool:
+    if not (sys.stdin.isatty() and sys.stdout.isatty()):
+        return False
+    try:
+        import readline  # noqa: F401
+    except ModuleNotFoundError:
+        return False
+    return True
+
+
 def main() -> None:
     for stream in (sys.stdout, sys.stdin):
         if hasattr(stream, "reconfigure"):
             stream.reconfigure(encoding="utf-8")
     setup_logging()
+    enable_input_history()
     log.info("started, model=%s", settings.model)
     mcp_servers, mcp_warning = resolve_mcp_servers(settings.mcp_servers_file, settings.mcp_servers)
     if mcp_warning:

@@ -11,6 +11,8 @@ python -m pip install -r requirements-lock.txt -r requirements-dev.txt
 pre-commit install
 ```
 
+Install Jinni as a command with `python -m pip install -e .`. Copy `settings.example.toml` to `settings.toml` to override defaults; `JINNI_SETTINGS` can point to another TOML file. Unknown keys and values with the wrong type are rejected at startup. MCP server allowlists can still be managed in `mcp_servers.json`.
+
 Run `python -m pytest`, `ruff check .`, and `pyright` before opening a pull request. CI runs the same checks on pushes and pull requests.
 
 ## Charts and data
@@ -43,6 +45,8 @@ Use `/memory facts`, `/memory events`, or `/memory search TEXT` to filter saved 
 ## CLI shortcuts
 
 Use `/help` for the command list, `/config` to inspect non-sensitive effective settings, `/stats` for session usage totals, `/save [NAME]` and `/load NAME` for bounded transcripts in `workspace/transcripts/`, and `/undo` to remove the latest chat turn from conversation history. `/undo` does not reverse file or other tool side effects.
+
+Press the up arrow at the interactive prompt to recall earlier input.
 
 During a chat, Jinni can ask a clarifying question and keep a SQLite-backed task list with `task_list` actions `list`, `due`, `add`, `done`, `remove`, and `clear`; added tasks can have an ISO due date, `/tasks` displays the list, and overdue tasks appear at startup. Clearing the list asks for confirmation. At the configured step limit, Jinni asks before continuing another block of tool calls.
 

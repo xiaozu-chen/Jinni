@@ -1,9 +1,12 @@
 from dataclasses import replace
+from pathlib import Path
 from types import SimpleNamespace
 
-from config import McpServerConfig, settings
+import pytest
+
+from config import McpServerConfig, load_settings, settings
 from agent import Agent
-from jinni import config_text, help_text, show_memories, stats_text, undo_last_turn
+from jinni import config_text, enable_input_history, help_text, show_memories, stats_text, undo_last_turn
 
 
 def test_help_lists_the_interactive_commands():
@@ -15,6 +18,86 @@ def test_help_lists_the_interactive_commands():
     assert "/save [NAME]" in help_output
     assert "/load NAME" in help_output
     assert "exit" in help_output
+
+
+def test_input_history_stays_off_for_non_interactive_streams(monkeypatch):
+    import io
+    import sys
+
+    monkeypatch.setattr(sys, "stdin", io.StringIO())
+    monkeypatch.setattr(sys, "stdout", io.StringIO())
+
+    assert not enable_input_history()
+
+
+def test_input_history_loads_readline_for_interactive_streams(monkeypatch):
+    import builtins
+    import io
+    import sys
+    from types import ModuleType
+
+    class Terminal(io.StringIO):
+        def isatty(self):
+            return True
+
+    original_import = builtins.__import__
+
+    def import_readline(name, *args, **kwargs):
+        if name == "readline":
+            return ModuleType("readline")
+        return original_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(sys, "stdin", Terminal())
+    monkeypatch.setattr(sys, "stdout", Terminal())
+    monkeypatch.setattr(builtins, "__import__", import_readline)
+
+    assert enable_input_history()
+
+
+def test_settings_load_from_toml_and_keep_defaults(tmp_path):
+    path = tmp_path / "settings.toml"
+    path.write_text(
+        'model = "test-model"\n'
+        'max_steps = 12\n'
+        'embed_enabled = false\n'
+        'memory_db = "state/memory.db"\n'
+        'embed_prefixes = [["nomic", "query: ", "document: "]]\n'
+        '[[mcp_servers]]\n'
+        'name = "fixture"\n'
+        'command = "python"\n'
+        'args = ["server.py"]\n'
+        'tools = ["get_table"]\n'
+        'env = { DATA_KEY = "private" }\n',
+        encoding="utf-8",
+    )
+
+    loaded = load_settings(path)
+
+    assert loaded.model == "test-model"
+    assert loaded.max_steps == 12
+    assert loaded.embed_enabled is False
+    assert loaded.memory_db == Path("state/memory.db")
+    assert loaded.keep_recent == settings.keep_recent
+    assert loaded.embed_prefixes == (("nomic", "query: ", "document: "),)
+    assert loaded.mcp_servers == (McpServerConfig(
+        name="fixture", command="python", args=("server.py",),
+        tools=("get_table",), env=(("DATA_KEY", "private"),),
+    ),)
+
+
+@pytest.mark.parametrize(
+    "text, message",
+    [
+        ('unknown_key = "value"\n', "unknown settings"),
+        ('max_steps = true\n', "max_steps must be an integer"),
+    ],
+)
+def test_settings_reject_unknown_keys_and_wrong_types(tmp_path, text, message):
+    path = tmp_path / "settings.toml"
+    path.write_text(text, encoding="utf-8")
+
+    with pytest.raises(ValueError, match=message):
+        load_settings(path)
 
 
 def test_config_shows_effective_settings_without_secrets():
