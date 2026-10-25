@@ -1,4 +1,5 @@
 import asyncio
+import argparse
 import json
 import sys
 import logging
@@ -23,6 +24,8 @@ from svgcharts import is_genuine_page
 from chart_records import check_chart_record, record_genuine_chart
 from audit import recent_calls
 from transcripts import load_transcript, save_transcript
+import project as project_tools
+import tools.workspace as workspace_tools
 
 log = logging.getLogger("jinni.cli")
 
@@ -150,7 +153,26 @@ def enable_input_history() -> bool:
     return True
 
 
-def main() -> None:
+def main(argv: list[str] | None = None) -> None:
+    parser = argparse.ArgumentParser(description="Jinni local AI agent")
+    parser.add_argument("--project", help="copy this project into the Jinni workspace before editing")
+    args = parser.parse_args(argv)
+
+    active_workspace = workspace_tools.WORKSPACE
+    if args.project:
+        try:
+            active_workspace = project_tools.copy_project(
+                args.project, workspace_tools.WORKSPACE / "projects"
+            )
+        except (OSError, ValueError) as error:
+            parser.error(str(error))
+    workspace_tools.WORKSPACE = active_workspace
+    export_all.WORKSPACE = active_workspace
+    try:
+        project_guidance = project_tools.load_project_guidance(active_workspace)
+    except ValueError as error:
+        parser.error(str(error))
+
     for stream in (sys.stdout, sys.stdin):
         if hasattr(stream, "reconfigure"):
             stream.reconfigure(encoding="utf-8")
@@ -165,7 +187,7 @@ def main() -> None:
         log.warning("plugin skipped: %s", err)
         print(f"  (plugin skipped: {err})")
 
-    agent = Agent()
+    agent = Agent(project_guidance=project_guidance)
     due = due_tasks()
     if due != "(task list is empty)":
         print("  Tasks due today or overdue:")

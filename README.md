@@ -58,6 +58,8 @@ The read-only coding tools include ranged `read_file`, `search_files`, `find_fil
 
 Use `check_python(path, checker)` for a bounded syntax check, Ruff lint, or Pyright type check. Ruff and Pyright are optional local tools; checks time out, cap their output, and never apply fixes.
 
+Launch `jinni --project PATH` to copy a repository into `workspace/projects/` before Jinni can edit it. Jinni loads that copy's `JINNI.md` as project guidance; generated folders such as virtual environments and caches are skipped. Without `--project`, the regular workspace remains active.
+
 ## Read-only MCP server
 
 Run `python mcp_server.py` from the project directory as an MCP stdio server. It exposes only `list_files`, `read_file`, and `recall`; file access stays inside the workspace. It has no write, web, or delete tools.
