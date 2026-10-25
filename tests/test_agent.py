@@ -16,6 +16,7 @@ from tools import TOOL_FUNCTIONS
 import agent as agent_mod
 from audit import recent_calls
 from approval_preview import MAX_ARGUMENT_SUMMARY, summarize_arguments
+from tools.web import trust_urls_from_text
 
 
 def make_call(name, args):
@@ -101,6 +102,7 @@ def test_invalid_python_write_is_rejected_before_approval(workspace, monkeypatch
 
 
 def test_remembered_approval_is_marked_auto(monkeypatch):
+    trust_urls_from_text("https://example.com/one https://example.com/two")
     monkeypatch.setattr("builtins.input", lambda _: "a")
     allowed = set()
     authorize(make_call("fetch_url", {"url": "https://example.com/one"}), allowed)
@@ -218,6 +220,7 @@ def test_always_is_refused_for_dangerous_tools(workspace, monkeypatch):
     assert not (workspace / "a.txt").exists()
 
 def test_domain_approval_covers_only_that_domain(monkeypatch):
+    trust_urls_from_text("https://www.mayoclinic.org/diet https://mayoclinic.org/other https://evil.example/x")
     answers = iter(["a", "n"])
     monkeypatch.setattr("builtins.input", lambda _: next(answers))
     allowed: set[tuple[str, str]] = set()
@@ -230,6 +233,38 @@ def test_domain_approval_covers_only_that_domain(monkeypatch):
     assert again is not None
     assert other is None
     assert allowed == {("fetch_url", "mayoclinic.org")}
+
+
+def test_fetch_refuses_urls_not_given_or_found_in_search(monkeypatch):
+    monkeypatch.setattr("builtins.input", lambda _: pytest.fail("untrusted URLs must not reach approval"))
+    args, message = authorize(make_call("fetch_url", {"url": "https://guessed.example/page"}))
+
+    assert args is None
+    assert "supplied" in message
+
+
+def test_search_results_authorize_follow_up_fetch(monkeypatch):
+    trust_urls_from_text("Search results: https://docs.example.org/guide?ref=1.")
+    monkeypatch.setattr("builtins.input", lambda _: "y")
+
+    args, message = authorize(make_call("fetch_url", {"url": "https://docs.example.org/guide?ref=1"}))
+
+    assert args is not None
+    assert message == ""
+
+
+def test_search_tool_output_adds_trusted_urls(monkeypatch):
+    monkeypatch.setattr("builtins.input", lambda _: "y")
+
+    async def fake_execute(call, args):
+        return "1. Docs\n   https://docs.example.org/guide\n   A helpful guide."
+
+    monkeypatch.setattr(agent_mod, "execute", fake_execute)
+    agent = Agent()
+    asyncio.run(agent.run_tools([make_call("web_search", {"query": "docs"})]))
+
+    args, message = authorize(make_call("fetch_url", {"url": "https://docs.example.org/guide"}))
+    assert args is not None and message == ""
 
 
 def test_non_object_arguments_are_rejected():

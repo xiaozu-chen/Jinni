@@ -5,6 +5,7 @@ from dataclasses import dataclass, replace
 import memory
 import semantic
 import task_store as tasks_db
+from tools.web import reset_trusted_urls
 from memory import MemoryStore
 from tools import workspace as ws
 from config import settings
@@ -39,6 +40,13 @@ def task_store(monkeypatch):
     store = tasks_db.TaskStore(":memory:")
     monkeypatch.setattr(tasks_db, "get_store", lambda: store)
     return store
+
+
+@pytest.fixture(autouse=True)
+def trusted_web_urls():
+    reset_trusted_urls()
+    yield
+    reset_trusted_urls()
 
 
 @pytest.fixture(autouse=True)

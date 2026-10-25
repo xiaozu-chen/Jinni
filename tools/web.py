@@ -4,7 +4,7 @@ import io
 import re
 import socket
 from html.parser import HTMLParser
-from urllib.parse import urljoin, urlparse
+from urllib.parse import urljoin, urlparse, urlunsplit
 from typing import Any
 
 import httpx
@@ -19,10 +19,49 @@ CONTEXT_WARNING_TOKENS = 750
 MAX_TABLE_FETCH = 2_000_000
 MAX_TABLE_CSV = 200_000
 MAX_TABLE_ROWS = 50
+MAX_TRUSTED_URLS = 500
+URL_PATTERN = re.compile(r"https?://[^\s<>\"']+", re.IGNORECASE)
+TRUSTED_URLS: set[str] = set()
 
 
 def _estimate_tokens(text: str) -> int:
     return max(1, len(text) // 4, sum(character.isdigit() for character in text))
+
+
+def _canonical_url(url: str) -> str | None:
+    try:
+        parts = urlparse(url)
+        if parts.scheme.lower() not in ("http", "https") or not parts.hostname or parts.username or parts.password:
+            return None
+        host = parts.hostname.lower().rstrip(".")
+        port = parts.port
+        if ":" in host:
+            host = f"[{host}]"
+        if port and not (parts.scheme.lower() == "http" and port == 80 or parts.scheme.lower() == "https" and port == 443):
+            host = f"{host}:{port}"
+        return urlunsplit((parts.scheme.lower(), host, parts.path or "/", parts.query, ""))
+    except ValueError:
+        return None
+
+
+def trust_urls_from_text(text: str) -> int:
+    added = 0
+    for match in URL_PATTERN.findall(text):
+        candidate = match.rstrip(".,;:!?) ]}")
+        canonical = _canonical_url(candidate)
+        if canonical and len(TRUSTED_URLS) < MAX_TRUSTED_URLS and canonical not in TRUSTED_URLS:
+            TRUSTED_URLS.add(canonical)
+            added += 1
+    return added
+
+
+def is_trusted_url(url: str) -> bool:
+    canonical = _canonical_url(url)
+    return canonical is not None and canonical in TRUSTED_URLS
+
+
+def reset_trusted_urls() -> None:
+    TRUSTED_URLS.clear()
 
 class TextExtractor(HTMLParser):
     SKIP = {"script", "style", "noscript", "head"}

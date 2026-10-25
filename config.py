@@ -71,6 +71,7 @@ class Settings:
 
     # MCP (optional: Jinni works without any of it)
     mcp_enabled: bool = True
+    mcp_servers_file: Path = Path("mcp_servers.json")
     mcp_servers: tuple[McpServerConfig, ...] = (
         McpServerConfig(name="ddgs", command="ddgs", args=("mcp",), tools=("search_text",)),
     )

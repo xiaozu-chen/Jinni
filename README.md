@@ -17,9 +17,11 @@ Chart export commands save files beside the HTML chart:
 
 `fetch_table(url, table_index)` saves a public HTML table as a CSV and records the source URL, fetch time, and content hash in a provenance sidecar. Charts made from that CSV retain the source and date.
 
-To bridge data from MCP, configure an allowlisted server tool that returns JSON with `columns` and `rows`, then use `/mcp-table <server> <tool> [JSON arguments]`. The repository includes a local sales fixture at `tests/fixtures/chart_data_server.py`; add it as an MCP server in `Settings.mcp_servers` to try `/mcp-table fixture get_table {"dataset":"sales"}`.
+To bridge data from MCP, configure an allowlisted server tool that returns JSON with `columns` and `rows`, then use `/mcp-table <server> <tool> [JSON arguments]`. The repository includes a local sales fixture at `tests/fixtures/chart_data_server.py`; configure it in `mcp_servers.json` to try `/mcp-table fixture get_table {"dataset":"sales"}`. The file has a top-level `servers` list; each entry can set `name`, `command`, `args`, `env`, `tools`, `remember`, `call_timeout`, and `mode`. If the file is missing, Jinni uses the built-in settings; an invalid file is reported and ignored.
 
-MCP tool calls are checked against each server's advertised input schema before they are sent. Tools also must be explicitly allowlisted in `Settings.mcp_servers`.
+MCP tool calls are checked against each server's advertised input schema before they are sent. Tools also must be explicitly allowlisted in `mcp_servers.json` or the built-in settings.
+
+Jinni only fetches URLs that the user supplied or that appeared in a web-search result during the session. The existing per-domain approval still applies.
 
 ## Memory maintenance
 

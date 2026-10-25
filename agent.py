@@ -13,6 +13,7 @@ from context import compact, to_transcript
 from models import Message, ToolCall
 from retry import with_retries
 from tools import TOOL_FUNCTIONS, REMEMBERABLE, SCOPES, TOOL_SCHEMAS, NEEDS_APPROVAL
+from tools.web import is_trusted_url, trust_urls_from_text
 import memory
 from memory import MemoryStore, Proposal, extraction_prompt, parse_proposals
 import inspect
@@ -39,6 +40,9 @@ def authorize(call: ToolCall, allowed: set[str, str] | None = None) -> tuple[dic
 
     if call.name not in TOOL_FUNCTIONS:
         return None, f"Error: unknown tool '{call.name}'"
+
+    if call.name in ("fetch_url", "fetch_table") and not is_trusted_url(str(args.get("url", ""))):
+        return None, "Error: fetch only URLs you supplied or that appeared in a search result."
     
     if call.name in NEEDS_APPROVAL:
         scope = SCOPES[call.name](args) if call.name in SCOPES else "*"
@@ -149,7 +153,13 @@ class Agent:
         run_parallel = self.parallel_tools and not any(call.name == "ask_user" for call in calls)
 
         async def one(call: ToolCall, args: dict[str, Any] | None, refusal: str) -> str:
-            return refusal if args is None else await execute(call, args)
+            if args is None:
+                return refusal
+            result = await execute(call, args)
+            name = call.name.lower()
+            if name == "web_search" or name.endswith("_search_text"):
+                trust_urls_from_text(result)
+            return result
 
         if run_parallel:
             results = list(await asyncio.gather(
@@ -310,6 +320,7 @@ class Agent:
     async def _turn(self, user_text: str) -> None:
         turn_start = len(self.messages)
         log.info("user: %s", user_text[:200])
+        trust_urls_from_text(user_text)
         self.messages.append({"role": "user", "content": user_text})
 
         step = 0

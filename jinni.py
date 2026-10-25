@@ -6,6 +6,7 @@ from datetime import date, timedelta
 
 import webbrowser
 from config import settings
+from mcp_config import resolve_mcp_servers
 from logger import setup_logging
 from agent import Agent
 from review import review, review_stale_facts
@@ -89,10 +90,11 @@ def help_text() -> str:
   exit               leave Jinni"""
 
 
-def config_text(config=settings) -> str:
+def config_text(config=settings, mcp_servers=None) -> str:
+    mcp_servers = config.mcp_servers if mcp_servers is None else mcp_servers
     servers = ", ".join(
         f"{server.name} ({', '.join(server.tools) or 'no tools'})"
-        for server in config.mcp_servers
+        for server in mcp_servers
     ) or "none"
     return "\n".join((
         f"model: {config.model}",
@@ -143,6 +145,10 @@ def main() -> None:
             stream.reconfigure(encoding="utf-8")
     setup_logging()
     log.info("started, model=%s", settings.model)
+    mcp_servers, mcp_warning = resolve_mcp_servers(settings.mcp_servers_file, settings.mcp_servers)
+    if mcp_warning:
+        log.warning("%s", mcp_warning)
+        print(f"  ({mcp_warning})")
     for err in LOAD_ERRORS:
         log.warning("plugin skipped: %s", err)
         print(f"  (plugin skipped: {err})")
@@ -160,7 +166,7 @@ def main() -> None:
         print(f"  (memory: {facts} facts, {notes} session notes)")
 
     with asyncio.Runner() as runner:
-        manager = McpManager(settings.mcp_servers) if settings.mcp_enabled else None
+        manager = McpManager(mcp_servers) if settings.mcp_enabled else None
         if manager:
             for line in runner.run(manager.start()):
                 print(line)
@@ -177,7 +183,7 @@ def main() -> None:
                     print(help_text())
                     continue
                 if cmd == "/config":
-                    print(config_text())
+                    print(config_text(mcp_servers=mcp_servers))
                     continue
                 if cmd == "/undo":
                     print(undo_last_turn(agent))
