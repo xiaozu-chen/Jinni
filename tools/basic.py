@@ -39,5 +39,5 @@ def get_current_time() -> str:
 def calculate(expression: str) -> str:
     try:
         return str(_eval(ast.parse(expression, mode="eval").body))
-    except Exception as e:
+    except (SyntaxError, TypeError, ValueError, ZeroDivisionError, OverflowError) as e:
         return f"Error: {e}"

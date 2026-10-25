@@ -1,3 +1,5 @@
+import logging
+
 try:
     from ddgs import DDGS
 except ModuleNotFoundError:  # optional dependency; keep plugin importable for discovery
@@ -8,6 +10,7 @@ from config import settings
 from .registry import tool
 
 MAX_RESULTS = 5
+log = logging.getLogger("jinni.tools.search")
 
 
 @tool(
@@ -28,6 +31,7 @@ def web_search(query: str) -> str:
             backend=settings.search_backend,
             )
     except Exception as e:
+        log.exception("web_search failed")
         return f"Error: the search failed ({type(e).__name__})."
     if not results:
         return "No results found."

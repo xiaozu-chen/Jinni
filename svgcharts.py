@@ -26,7 +26,7 @@ LIGHT_VARS = ("--bg:#ffffff; --fg:#1f2328; --muted:#6b7280; --grid:#e5e7eb; "
               "--c4:#cc79a7; --c5:#56b4e9; --c6:#f0e442; --c7:#000000;")
 DARK_VARS = ("--bg:#111418; --fg:#e6e8eb; --muted:#9aa4b2; --grid:#2a2f37; "
              "--c0:#56b4e9; --c1:#e69f00; --c2:#00b386; --c3:#ff7357; "
-             "--c4:#cc79a7; --c5:#56b4e9; --c6:#f0e442; --c7:#ffffff;")
+             "--c4:#cc79a7; --c5:#0072b2; --c6:#f0e442; --c7:#ffffff;")
 
 SVG_EXPORT_CSS = """\
 :root { $vars }

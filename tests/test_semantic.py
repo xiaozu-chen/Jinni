@@ -1,5 +1,6 @@
 import re
 import sys
+import threading
 from dataclasses import replace
 
 import httpx
@@ -7,11 +8,19 @@ import numpy as np
 import pytest
 
 import semantic
+from bench_embed import threshold_summary
 from config import settings
 from semantic import EmbedError, catch_up, fuse, hybrid_search, semantic_search
 from tools.memory_tools import recall
 
 CONCEPTS = {"dog": 0, "canine": 0, "puppy": 0, "cat": 1, "feline": 1, "python": 2, "code": 2}
+
+
+@pytest.fixture(autouse=True)
+def reset_embed_breaker():
+    semantic.reset_circuit()
+    yield
+    semantic.reset_circuit()
 
 
 def fake_vectors(texts):
@@ -92,11 +101,70 @@ def test_catch_up_embeds_each_memory_once(memory_store, fake_server):
     assert fake_server[0][0].startswith("search_document: ")
 
 
+def test_prefixes_can_be_selected_per_model(monkeypatch):
+    monkeypatch.setattr(semantic, "settings", replace(
+        settings,
+        embed_model="custom-model",
+        embed_query_prefix="fallback query: ",
+        embed_doc_prefix="fallback doc: ",
+        embed_prefixes=(("custom-model", "query: ", "document: "),),
+    ))
+
+    assert semantic.embedding_prefixes() == ("query: ", "document: ")
+    assert semantic.embedding_prefixes("other-model") == ("fallback query: ", "fallback doc: ")
+
+
+def test_embedding_circuit_breaker_skips_retries_for_one_minute(monkeypatch):
+    now = [100.0]
+    calls = []
+
+    def refuse(url, **kwargs):
+        calls.append(url)
+        raise httpx.ConnectError("refused")
+
+    monkeypatch.setattr(semantic.time, "monotonic", lambda: now[0])
+    monkeypatch.setattr(semantic.httpx, "post", refuse)
+    with pytest.raises(EmbedError, match="ConnectError"):
+        semantic.embed_texts(["first"])
+    assert semantic.circuit_open()
+    with pytest.raises(EmbedError, match="paused"):
+        semantic.embed_texts(["second"])
+    assert len(calls) == 1
+
+    now[0] += semantic.EMBED_CIRCUIT_SECONDS + 1
+    assert not semantic.circuit_open()
+    serve(monkeypatch, {"data": [{"index": 0, "embedding": [1.0, 0.0]}]})
+    assert semantic.embed_texts(["third"]).shape == (1, 2)
+
+
+def test_startup_warmup_runs_in_background(monkeypatch, memory_store):
+    finished = threading.Event()
+    monkeypatch.setattr(semantic, "settings", replace(settings, embed_enabled=True))
+    monkeypatch.setattr(semantic, "_warmup_started", False)
+    monkeypatch.setattr(semantic, "catch_up", lambda store: finished.set() or 1)
+
+    assert semantic.start_warmup(memory_store)
+    assert not semantic.start_warmup(memory_store)
+    assert finished.wait(1)
+
+
 def test_catch_up_redoes_work_when_the_model_changes(memory_store, fake_server, monkeypatch):
     memory_store.add("fact", "The user owns a puppy.")
     catch_up(memory_store)
     monkeypatch.setattr(semantic, "settings", replace(semantic.settings, embed_model="another-model"))
     assert catch_up(memory_store) == 1
+
+
+def test_prefix_changes_invalidate_stored_embeddings(memory_store, fake_server, monkeypatch):
+    memory_store.add("fact", "The user owns a puppy.")
+    catch_up(memory_store)
+    monkeypatch.setattr(semantic, "settings", replace(
+        semantic.settings,
+        embed_prefixes=(("nomic-embed-text-v1.5", "query: ", "document: "),),
+    ))
+
+    assert catch_up(memory_store) == 1
+    assert fake_server[-1][0].startswith("document: ")
 
 
 def test_semantic_search_finds_meaning_without_shared_words(memory_store, fake_server):
@@ -162,13 +230,14 @@ def test_vectors_follow_their_memory(memory_store, fake_server):
     first = memory_store.add("fact", "The user owns a puppy.")
     memory_store.add("fact", "The user has a feline.")
     catch_up(memory_store)
-    assert len(memory_store.load_vectors(settings.embed_model)) == 2
+    cache_key = semantic.embedding_cache_key()
+    assert len(memory_store.load_vectors(cache_key)) == 2
 
     memory_store.delete(first.id)
-    assert len(memory_store.load_vectors(settings.embed_model)) == 1
+    assert len(memory_store.load_vectors(cache_key)) == 1
 
     memory_store.clear()
-    assert memory_store.load_vectors(settings.embed_model) == []
+    assert memory_store.load_vectors(cache_key) == []
 
 
 def test_vector_for_a_deleted_memory_is_dropped(memory_store):
@@ -185,3 +254,8 @@ def test_blank_query_returns_nothing(memory_store, fake_server):
 def test_recall_tool_uses_meaning(memory_store, fake_server):
     memory_store.add("fact", "The user owns a puppy.")
     assert "puppy" in recall("canine")
+
+
+def test_embedding_benchmark_suggests_only_a_separated_threshold():
+    assert "Suggested floor: 0.650" in threshold_summary([0.7, 0.8], [0.3, 0.6])
+    assert "ranges overlap" in threshold_summary([0.6, 0.8], [0.3, 0.7])

@@ -318,7 +318,7 @@ class McpServer:
                 command=exe, args=list(self.cfg.args), env=dict(self.cfg.env) or None
             )
             errlog = open(f"mcp-{clean(self.cfg.name)}.log", "a", encoding="utf-8")
-            extra = {} if self.cfg.mode == "auto" else {"mode": self.cfg.mode}
+            extra: dict[str, Any] = {} if self.cfg.mode == "auto" else {"mode": self.cfg.mode}
             async with sdk.Client(sdk.stdio_client(params, errlog=errlog), **extra) as client:
                 listing = await client.list_tools()
                 self.client = client

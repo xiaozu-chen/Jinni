@@ -6,7 +6,8 @@ import pytest
 from tools import NEEDS_APPROVAL, TOOL_FUNCTIONS, TOOL_SCHEMAS
 from tools import web
 from tools.basic import calculate
-from tools.files import MAX_READ, edit_file, list_files, read_file, write_file
+from tools.files import (MAX_READ, code_outline, delete_file, edit_file, find_files, list_files,
+                         project_tree, read_file, search_files, write_file)
 from tools.web import check_public_url, fetch_table, fetch_url, host_scope
 from tools.provenance import read_csv_provenance
 from tools.workspace import safe_path
@@ -52,6 +53,66 @@ def test_read_is_capped(workspace):
     assert len(read_file("big.txt")) == MAX_READ
 
 
+def test_read_file_returns_numbered_line_ranges(workspace):
+    (workspace / "lines.txt").write_text("one\ntwo\nthree\nfour\n", encoding="utf-8")
+
+    assert read_file("lines.txt", start=2, end=3) == "2: two\n3: three\n"
+    assert read_file("lines.txt", start=0, end=3).startswith("Error:")
+
+
+def test_read_file_caps_range_size(workspace):
+    (workspace / "lines.txt").write_text("line\n" * 250, encoding="utf-8")
+
+    assert "at most 200 lines" in read_file("lines.txt", start=1, end=201)
+
+
+def test_search_files_returns_file_line_and_snippet(workspace):
+    (workspace / "src").mkdir()
+    (workspace / "src" / "sample.py").write_text("first\nneedle here\n", encoding="utf-8")
+
+    assert search_files("needle") == "src/sample.py:2: needle here"
+    assert "src/sample.py:2" in search_files("needl.", regex=True)
+
+
+def test_search_files_rejects_complex_patterns_and_limits_scope(workspace):
+    (workspace / "sample.txt").write_text("needle", encoding="utf-8")
+
+    assert "too complex" in search_files("(a+)+$", regex=True)
+    assert "too complex" in search_files("a{100000}", regex=True)
+    assert search_files("needle", path="missing").startswith("Error:")
+
+
+def test_find_files_matches_globs_and_blocks_parent_patterns(workspace):
+    (workspace / "src").mkdir()
+    (workspace / "src" / "sample.py").write_text("pass", encoding="utf-8")
+    (workspace / "readme.md").write_text("readme", encoding="utf-8")
+
+    assert find_files("**/*.py") == "src/sample.py"
+    assert find_files("../*.py").startswith("Error:")
+
+
+def test_code_outline_lists_definitions_and_reports_syntax_errors(workspace):
+    (workspace / "module.py").write_text("class Cat:\n    def purr(self): pass\n", encoding="utf-8")
+    (workspace / "broken.py").write_text("def broken(:\n", encoding="utf-8")
+
+    outline = code_outline("module.py")
+    assert "1: class Cat" in outline
+    assert "2: function purr" in outline
+    assert "syntax error on line 1" in code_outline("broken.py")
+
+
+def test_project_tree_respects_depth_and_entry_caps(workspace):
+    (workspace / "one").mkdir()
+    (workspace / "one" / "two").mkdir()
+    (workspace / "one" / "two" / "leaf.txt").write_text("leaf", encoding="utf-8")
+    (workspace / "root.txt").write_text("root", encoding="utf-8")
+
+    tree = project_tree(max_depth=1)
+    assert "one/" in tree and "root.txt" in tree
+    assert "two/" not in tree
+    assert "output capped" in project_tree(max_entries=1)
+
+
 def test_list_empty_folder(workspace):
     assert list_files(".") == "(empty folder)"
 
@@ -82,6 +143,26 @@ def test_edit_ambiguous_text_changes_nothing(workspace):
 def test_edit_empty_old_text(workspace):
     (workspace / "a.txt").write_text("hello", encoding="utf-8")
     assert edit_file("a.txt", "", "x").startswith("Error")
+
+
+def test_delete_file_moves_file_into_reversible_trash(workspace):
+    (workspace / "notes").mkdir()
+    (workspace / "notes" / "keep.txt").write_text("still here", encoding="utf-8")
+
+    result = delete_file("notes/keep.txt")
+
+    assert "Moved notes/keep.txt to .trash/notes/keep.txt" in result
+    assert not (workspace / "notes" / "keep.txt").exists()
+    assert (workspace / ".trash" / "notes" / "keep.txt").read_text(encoding="utf-8") == "still here"
+
+
+def test_delete_file_refuses_directories_and_trash_contents(workspace):
+    (workspace / "folder").mkdir()
+    (workspace / ".trash").mkdir()
+    (workspace / ".trash" / "old.txt").write_text("parked", encoding="utf-8")
+
+    assert delete_file("folder").startswith("Error:")
+    assert delete_file(".trash/old.txt").startswith("Error:")
 
 
 @pytest.mark.parametrize("expr,answer", [
@@ -115,16 +196,24 @@ def test_fetch_refuses_localhost():
     assert fetch_url("http://localhost:8080").startswith("Error")
 
 
+def test_unexpected_fetch_error_is_logged_with_traceback(monkeypatch, caplog):
+    def broken_fetch(_url):
+        raise RuntimeError("fixture defect")
+
+    monkeypatch.setattr(web, "_fetch_page", broken_fetch)
+
+    assert fetch_url("https://example.com").startswith("Error:")
+    assert any(
+        record.name == "jinni.tools.web" and record.exc_info
+        and record.exc_info[0] is RuntimeError
+        for record in caplog.records
+    )
+
+
 def test_fetch_extracts_text(monkeypatch):
     page = "<html><head><title>t</title></head><body><script>bad()</script><p>Hello</p></body></html>"
 
-    def fake_get(url, **kwargs):
-        return httpx.Response(
-            200, headers={"content-type": "text/html"}, text=page,
-            request=httpx.Request("GET", url),
-        )
-
-    monkeypatch.setattr(web.httpx, "get", fake_get)
+    monkeypatch.setattr(web, "_fetch_page", lambda url: ("text/html", page))
     monkeypatch.setattr(web, "check_public_url", lambda url: None)
 
     result = fetch_url("https://example.com")
@@ -216,37 +305,78 @@ def test_host_scope(url, expected):
 
 def test_cross_site_redirect_is_not_followed(monkeypatch):
     calls = []
-
-    def fake_get(url, **kwargs):
-        calls.append(url)
-        return httpx.Response(
-            302, headers={"location": "https://evil.example/steal"},
-            request=httpx.Request("GET", url),
-        )
-
-    monkeypatch.setattr(web.httpx, "get", fake_get)
+    response = httpx.Response(
+        302, headers={"location": "https://evil.example/steal"},
+        request=httpx.Request("GET", "https://good.example/page"),
+    )
+    monkeypatch.setattr(web.httpx, "Client", _web_client([response], calls))
     monkeypatch.setattr(web, "check_public_url", lambda url: None)
 
     result = fetch_url("https://good.example/page")
 
     assert result.startswith("Error")
-    assert "evil.example" in result
+    assert "different site" in result
     assert calls == ["https://good.example/page"]
 
 
 def test_same_site_redirect_is_followed(monkeypatch):
-    def fake_get(url, **kwargs):
-        if "www." not in url:
-            return httpx.Response(
-                301, headers={"location": "https://www.good.example/page"},
-                request=httpx.Request("GET", url),
-            )
-        return httpx.Response(
+    responses = [
+        httpx.Response(
+            301, headers={"location": "https://www.good.example/page"},
+            request=httpx.Request("GET", "https://good.example/page"),
+        ),
+        httpx.Response(
             200, headers={"content-type": "text/plain"}, text="hello",
-            request=httpx.Request("GET", url),
-        )
-
-    monkeypatch.setattr(web.httpx, "get", fake_get)
+            request=httpx.Request("GET", "https://www.good.example/page"),
+        ),
+    ]
+    calls = []
+    monkeypatch.setattr(web.httpx, "Client", _web_client(responses, calls))
     monkeypatch.setattr(web, "check_public_url", lambda url: None)
 
     assert "hello" in fetch_url("https://good.example/page")
+    assert calls == ["https://good.example/page", "https://www.good.example/page"]
+
+
+def _web_client(responses, calls=None):
+    calls = [] if calls is None else calls
+
+    class Client:
+        def __init__(self, **kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def stream(self, method, url):
+            calls.append(url)
+            response = responses.pop(0)
+
+            class Stream:
+                def __enter__(self):
+                    return response
+
+                def __exit__(self, *args):
+                    response.close()
+                    return False
+
+            return Stream()
+
+    return Client
+
+
+def test_fetch_url_enforces_download_cap_and_warns_on_large_context(monkeypatch):
+    response = httpx.Response(
+        200, headers={"content-type": "text/plain"}, content=b"x" * (web.MAX_FETCH_BYTES + 1),
+        request=httpx.Request("GET", "https://example.com"),
+    )
+    monkeypatch.setattr(web.httpx, "Client", _web_client([response]))
+    monkeypatch.setattr(web, "check_public_url", lambda url: None)
+    assert "too large" in fetch_url("https://example.com")
+
+    monkeypatch.setattr(web, "_fetch_page", lambda url: ("text/plain", "x" * web.MAX_FETCH))
+    result = fetch_url("https://example.com")
+    assert "large result" in result

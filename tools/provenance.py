@@ -12,11 +12,28 @@ def sidecar_path(csv_path: Path) -> Path:
 
 def write_csv_provenance(csv_path: Path, data: bytes, source_url: str, table_index: int) -> dict:
     record = {
+        "kind": "source",
         "source_url": source_url,
         "fetched_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "table_index": table_index,
         "sha256": hashlib.sha256(data).hexdigest(),
     }
+    _write_record(csv_path, record)
+    return record
+
+
+def write_typed_csv_provenance(csv_path: Path, data: bytes) -> dict:
+    record = {
+        "kind": "typed",
+        "source_url": "jinni://typed",
+        "fetched_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "sha256": hashlib.sha256(data).hexdigest(),
+    }
+    _write_record(csv_path, record)
+    return record
+
+
+def _write_record(csv_path: Path, record: dict) -> None:
     target = sidecar_path(csv_path)
     target.parent.mkdir(parents=True, exist_ok=True)
     temporary = None
@@ -30,7 +47,6 @@ def write_csv_provenance(csv_path: Path, data: bytes, source_url: str, table_ind
     finally:
         if temporary is not None and temporary.exists():
             temporary.unlink()
-    return record
 
 
 def read_csv_provenance(csv_path: Path) -> dict | None:
@@ -45,6 +61,9 @@ def read_csv_provenance(csv_path: Path) -> dict | None:
         if not all(isinstance(record.get(key), str) and record[key]
                    for key in ("source_url", "fetched_at")):
             return None
+        if record.get("kind", "source") not in ("source", "typed"):
+            return None
+        record.setdefault("kind", "source")
         return record
     except (OSError, ValueError, TypeError):
         return None

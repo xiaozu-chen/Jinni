@@ -6,6 +6,7 @@ from datetime import date
 from difflib import SequenceMatcher
 from functools import lru_cache
 from pathlib import Path
+from uuid import uuid4
 
 from config import settings
 
@@ -16,7 +17,8 @@ CREATE TABLE IF NOT EXISTS memories (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     kind TEXT NOT NULL CHECK (kind IN ('fact', 'event')),
     text TEXT NOT NULL,
-    created TEXT NOT NULL
+    created TEXT NOT NULL,
+    session_id TEXT NOT NULL DEFAULT ''
 );
 CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts
     USING fts5(text, tokenize = 'porter unicode61');
@@ -39,6 +41,7 @@ class Memory:
     kind: str
     text: str
     created: str
+    session_id: str = ""
 
 
 @dataclass(frozen=True)
@@ -51,8 +54,12 @@ class MemoryStore:
     def __init__(self, path: Path | str) -> None:
         self.conn = sqlite3.connect(path, check_same_thread=False)
         self.lock = threading.Lock()
+        self.session_id = f"{date.today():%Y%m%d}-{uuid4().hex[:6]}"
         with self.lock:
             self.conn.executescript(SCHEMA)
+            columns = {row[1] for row in self.conn.execute("PRAGMA table_info(memories)")}
+            if "session_id" not in columns:
+                self.conn.execute("ALTER TABLE memories ADD COLUMN session_id TEXT NOT NULL DEFAULT ''")
 
 
     def _count(self, kind: str) -> int:
@@ -61,7 +68,7 @@ class MemoryStore:
 
     def _get(self, memory_id: int) -> Memory | None:
         row = self.conn.execute(
-            "SELECT id, kind, text, created FROM memories WHERE id = ?", (memory_id,)
+            "SELECT id, kind, text, created, session_id FROM memories WHERE id = ?", (memory_id,)
         ).fetchone()
         return Memory(*row) if row is not None else None
 
@@ -89,16 +96,17 @@ class MemoryStore:
 
             created = date.today().isoformat()
             cur = self.conn.execute(
-                "INSERT INTO memories (kind, text, created) VALUES (?, ?, ?)", (kind, text, created)
+                "INSERT INTO memories (kind, text, created, session_id) VALUES (?, ?, ?, ?)",
+                (kind, text, created, self.session_id),
             )
             new_id = cur.lastrowid or 0
             self.conn.execute("INSERT INTO memories_fts (rowid, text) VALUES (?, ?)", (new_id, text))
-        return Memory(new_id, kind, text, created)
+        return Memory(new_id, kind, text, created, self.session_id)
 
     def facts(self) -> list[Memory]:
         with self.lock:
             rows = self.conn.execute(
-                "SELECT id, kind, text, created FROM memories WHERE kind = 'fact' ORDER BY id"
+                "SELECT id, kind, text, created, session_id FROM memories WHERE kind = 'fact' ORDER BY id"
             ).fetchall()
         return [Memory(*r) for r in rows]
 
@@ -110,7 +118,7 @@ class MemoryStore:
             return []
         with self.lock:
             rows = self.conn.execute(
-                "SELECT id, kind, text, created FROM memories WHERE kind = 'fact' ORDER BY id"
+                "SELECT id, kind, text, created, session_id FROM memories WHERE kind = 'fact' ORDER BY id"
             ).fetchall()
         matches = []
         for row in rows:
@@ -136,7 +144,7 @@ class MemoryStore:
     def events_before(self, cutoff: date, limit: int = 10) -> list[Memory]:
         with self.lock:
             rows = self.conn.execute(
-                "SELECT id, kind, text, created FROM memories "
+                "SELECT id, kind, text, created, session_id FROM memories "
                 "WHERE kind = 'event' AND created < ? ORDER BY created, id LIMIT ?",
                 (cutoff.isoformat(), max(0, limit)),
             ).fetchall()
@@ -160,7 +168,7 @@ class MemoryStore:
     def list_all(self) -> list[Memory]:
         with self.lock:
             rows = self.conn.execute(
-                "SELECT id, kind, text, created FROM memories "
+                "SELECT id, kind, text, created, session_id FROM memories "
                 "ORDER BY CASE kind WHEN 'fact' THEN 0 ELSE 1 END, id"
             ).fetchall()
         return [Memory(*r) for r in rows]
@@ -189,10 +197,19 @@ class MemoryStore:
         with self.lock:
             return self._get(memory_id)
 
+    def facts_before(self, cutoff: date) -> list[Memory]:
+        with self.lock:
+            rows = self.conn.execute(
+                "SELECT id, kind, text, created, session_id FROM memories "
+                "WHERE kind = 'fact' AND created < ? ORDER BY created, id",
+                (cutoff.isoformat(),),
+            ).fetchall()
+        return [Memory(*row) for row in rows]
+
     def pending(self, model: str, limit: int) -> list[Memory]:
         with self.lock:
             rows = self.conn.execute(
-                "SELECT m.id, m.kind, m.text, m.created FROM memories m "
+                "SELECT m.id, m.kind, m.text, m.created, m.session_id FROM memories m "
                 "LEFT JOIN embeddings e ON e.memory_id = m.id AND e.model = ? "
                 "WHERE e.memory_id IS NULL ORDER BY m.id LIMIT ? ",
                 (model, limit),

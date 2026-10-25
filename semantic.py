@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import logging
+import hashlib
+import threading
+import time
 from typing import TYPE_CHECKING
 
 import httpx
@@ -16,6 +19,12 @@ log = logging.getLogger("jinni.semantic")
 BATCH = 32
 MAX_BATCHES = 20
 RRF_K = 60
+EMBED_CIRCUIT_SECONDS = 60
+_circuit_lock = threading.Lock()
+_circuit_until = 0.0
+_warmup_lock = threading.Lock()
+_warmup_started = False
+_catch_up_lock = threading.Lock()
 
 
 class EmbedError(Exception):
@@ -30,10 +39,43 @@ def _np():
     return numpy
 
 
+def embedding_prefixes(model: str | None = None) -> tuple[str, str]:
+    model = model or settings.embed_model
+    for name, query_prefix, document_prefix in settings.embed_prefixes:
+        if name == model:
+            return query_prefix, document_prefix
+    return settings.embed_query_prefix, settings.embed_doc_prefix
+
+
+def embedding_cache_key() -> str:
+    query_prefix, document_prefix = embedding_prefixes()
+    prefix_hash = hashlib.sha256(f"{query_prefix}\0{document_prefix}".encode("utf-8")).hexdigest()[:12]
+    return f"{settings.embed_model}:{prefix_hash}"
+
+
+def circuit_open() -> bool:
+    with _circuit_lock:
+        return time.monotonic() < _circuit_until
+
+
+def reset_circuit() -> None:
+    global _circuit_until
+    with _circuit_lock:
+        _circuit_until = 0.0
+
+
+def _trip_circuit() -> None:
+    global _circuit_until
+    with _circuit_lock:
+        _circuit_until = time.monotonic() + EMBED_CIRCUIT_SECONDS
+
+
 def embed_texts(texts: list[str]) -> np.ndarray:
     """One L2-normalized float32 vector per text, so cosine similarity is just a dot product."""
-    np = _np()
+    if circuit_open():
+        raise EmbedError("embedding service paused after a recent failure; retry after one minute")
     try:
+        np = _np()
         response = httpx.post(
             f"{settings.embed_url}/embeddings",
             json={"model": settings.embed_model, "input": texts},
@@ -42,38 +84,53 @@ def embed_texts(texts: list[str]) -> np.ndarray:
         response.raise_for_status()
         data = sorted(response.json()["data"], key=lambda d: d.get("index", 0))
         matrix = np.array([d["embedding"] for d in data], dtype=np.float32)
+    except EmbedError as error:
+        _trip_circuit()
+        raise error
     except (httpx.HTTPError, KeyError, ValueError, TypeError, AttributeError) as e:
-        raise EmbedError(f"{type(e).__name__}: {e}") from e
+        error = EmbedError(f"{type(e).__name__}: {e}")
+        _trip_circuit()
+        raise error from e
 
     if matrix.ndim != 2 or matrix.shape[0] != len(texts) or not np.isfinite(matrix).all():
+        _trip_circuit()
         raise EmbedError("the server returned vectors in an unexpected shape")
     norms = np.linalg.norm(matrix, axis=1, keepdims=True)
     if (norms == 0).any():
+        _trip_circuit()
         raise EmbedError("the server returned an empty (all-zero) vector")
     return matrix / norms
 
 
 def catch_up(store: MemoryStore) -> int:
     """Embed every memory that has no vector yet. Returns how many were embedded."""
+    with _catch_up_lock:
+        return _catch_up(store)
+
+
+def _catch_up(store: MemoryStore) -> int:
     done = 0
+    cache_key = embedding_cache_key()
     for _ in range(MAX_BATCHES):
-        batch = store.pending(settings.embed_model, BATCH)
+        batch = store.pending(cache_key, BATCH)
         if not batch:
             break
-        vectors = embed_texts([settings.embed_doc_prefix + m.text for m in batch])
+        _query_prefix, document_prefix = embedding_prefixes()
+        vectors = embed_texts([document_prefix + m.text for m in batch])
         for memory, vector in zip(batch, vectors):
-            store.save_vector(memory.id, settings.embed_model, vector.shape[0], vector.tobytes())
+            store.save_vector(memory.id, cache_key, vector.shape[0], vector.tobytes())
         done += len(batch)
     return done
 
 
 def semantic_search(store: MemoryStore, query: str, limit: int) -> list[tuple[int, float]]:
     """(memory id, cosine similarity) for the best matches above the similarity floor."""
-    rows = store.load_vectors(settings.embed_model)
+    rows = store.load_vectors(embedding_cache_key())
     if not rows:
         return []
     np = _np()
-    q = embed_texts([settings.embed_query_prefix + query])[0]
+    query_prefix, _document_prefix = embedding_prefixes()
+    q = embed_texts([query_prefix + query])[0]
     dim = q.shape[0]
     usable = [
         (i, np.frombuffer(blob, dtype=np.float32))
@@ -112,7 +169,8 @@ def hybrid_search(store: MemoryStore, query: str, limit: int | None = None) -> t
             by_meaning = semantic_search(store, query, limit * 2)
             mode = "hybrid"
         except EmbedError as e:
-            log.warning("semantic search unavailable, using keywords only: %s", e)
+            if not circuit_open():
+                log.warning("semantic search unavailable, using keywords only: %s", e)
 
     if mode == "keyword":
         results = by_keyword[:limit]
@@ -128,3 +186,23 @@ def hybrid_search(store: MemoryStore, query: str, limit: int | None = None) -> t
 
     log.info("recall %r: %d result(s), mode=%s", query[:60], len(results), mode)
     return results, mode
+
+
+def _warmup(store: MemoryStore) -> None:
+    try:
+        count = catch_up(store)
+        log.info("semantic startup warm-up embedded %d memories", count)
+    except EmbedError as error:
+        log.info("semantic startup warm-up skipped: %s", error)
+
+
+def start_warmup(store: MemoryStore) -> bool:
+    global _warmup_started
+    if not settings.embed_enabled:
+        return False
+    with _warmup_lock:
+        if _warmup_started:
+            return False
+        _warmup_started = True
+    threading.Thread(target=_warmup, args=(store,), name="jinni-embedding-warmup", daemon=True).start()
+    return True

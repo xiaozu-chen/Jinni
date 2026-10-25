@@ -1,0 +1,55 @@
+[build-system]
+requires = ["setuptools>=65", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "jinni-local-agent"
+version = "0.1.0"
+description = "A local AI agent with workspace tools, memory, and charts"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "ddgs==9.16.1",
+  "httpx==0.28.1",
+  "mcp>=2,<3",
+  "numpy==2.4.6",
+  "openai==3.35.1",
+  "pyreadline3==3.5.6; platform_system == 'Windows'",
+]
+
+[project.scripts]
+jinni = "jinni:main"
+
+[tool.setuptools]
+py-modules = [
+  "agent",
+  "approval_preview",
+  "audit",
+  "browser_runtime",
+  "chart_records",
+  "config",
+  "context",
+  "export_all",
+  "export_formats",
+  "export_png",
+  "eval_harness",
+  "jinni",
+  "logger",
+  "log_safety",
+  "mcp_client",
+  "mcp_config",
+  "mcp_data",
+  "mcp_server",
+  "memory",
+  "models",
+  "project",
+  "retry",
+  "review",
+  "semantic",
+  "svgcharts",
+  "task_store",
+  "transcripts",
+]
+
+[tool.setuptools.packages.find]
+include = ["tools*"]
