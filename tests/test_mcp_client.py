@@ -3,9 +3,11 @@ import inspect
 import sys
 from types import SimpleNamespace
 
+import pytest
+
 from config import McpServerConfig
 from mcp_client import (McpServer, build_parameters, find_command, format_result, plain,
-                        register_server_tools, shrink_schema, tool_name)
+                        register_server_tools, shrink_schema, tool_name, validate_arguments)
 from tools import registry
 
 SCHEMA = {"type": "object", "properties": {"q": {"type": "string", "description": "x" * 500}}}
@@ -57,6 +59,40 @@ def test_non_object_schema_falls_back_to_no_parameters():
     empty = {"type": "object", "properties": {}}
     assert build_parameters(SimpleNamespace(input_schema={"type": "string"})) == empty
     assert build_parameters(SimpleNamespace()) == empty
+
+
+def test_validate_arguments_checks_required_types_and_extra_fields():
+    schema = {
+        "type": "object",
+        "properties": {"query": {"type": "string", "minLength": 1}},
+        "required": ["query"],
+        "additionalProperties": False,
+    }
+
+    assert validate_arguments(schema, {"query": "cats"}) == []
+    assert "query is required" in validate_arguments(schema, {})[0]
+    assert "must be string" in validate_arguments(schema, {"query": 3})[0]
+    assert "extra is not allowed" in validate_arguments(schema, {"query": "cats", "extra": True})[0]
+
+
+def test_validate_arguments_checks_nested_values_and_refs():
+    schema = {
+        "type": "object",
+        "properties": {
+            "items": {"type": "array", "items": {"$ref": "#/$defs/entry"}},
+        },
+        "required": ["items"],
+        "$defs": {"entry": {"type": "object", "properties": {
+            "count": {"type": "integer", "minimum": 1},
+        }, "required": ["count"]}},
+    }
+
+    assert validate_arguments(schema, {"items": [{"count": 2}]}) == []
+    assert "minimum" in validate_arguments(schema, {"items": [{"count": 0}]})[0]
+
+
+def test_bad_schema_fails_validation_closed():
+    assert validate_arguments(None, {}) == ["the server did not advertise an object input schema"]
 
 
 def test_tool_names_are_sanitized():
@@ -159,3 +195,57 @@ def test_missing_sdk_fails_soft(monkeypatch):
     asyncio.run(scenario())
     assert server.state == "down"
     assert "not installed" in server.error
+
+
+class FakeCallClient:
+    def __init__(self):
+        self.calls = []
+
+    async def call_tool(self, name, arguments):
+        self.calls.append((name, arguments))
+        return result([text("ok")])
+
+    async def list_tools(self):
+        return SimpleNamespace(tools=[])
+
+
+def ready_server():
+    server = McpServer(McpServerConfig(name="fixture", command="fixture", tools=("lookup",)))
+    server.state = "up"
+    server.client = FakeCallClient()
+    server.tools = [SimpleNamespace(
+        name="lookup",
+        input_schema={"type": "object", "properties": {"query": {"type": "string"}},
+                      "required": ["query"]},
+    )]
+    return server
+
+
+def test_server_call_rejects_bad_arguments_before_contacting_server():
+    server = ready_server()
+
+    message = asyncio.run(server.call("lookup", {"query": 4}))
+
+    assert "invalid arguments" in message
+    assert "must be string" in message
+    assert server.client.calls == []
+
+
+def test_raw_server_call_validates_arguments_and_forwards_valid_calls():
+    server = ready_server()
+
+    with pytest.raises(ValueError, match="query is required"):
+        asyncio.run(server.call_raw("lookup", {}))
+    result_value = asyncio.run(server.call_raw("lookup", {"query": "cats"}))
+
+    assert result_value.content[0].text == "ok"
+    assert server.client.calls == [("lookup", {"query": "cats"})]
+
+
+def test_server_call_refuses_tools_outside_allowlist():
+    server = ready_server()
+
+    message = asyncio.run(server.call("other", {}))
+
+    assert "not allowlisted" in message
+    assert server.client.calls == []

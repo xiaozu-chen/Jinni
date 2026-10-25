@@ -19,6 +19,8 @@ Chart export commands save files beside the HTML chart:
 
 To bridge data from MCP, configure an allowlisted server tool that returns JSON with `columns` and `rows`, then use `/mcp-table <server> <tool> [JSON arguments]`. The repository includes a local sales fixture at `tests/fixtures/chart_data_server.py`; add it as an MCP server in `Settings.mcp_servers` to try `/mcp-table fixture get_table {"dataset":"sales"}`.
 
+MCP tool calls are checked against each server's advertised input schema before they are sent. Tools also must be explicitly allowlisted in `Settings.mcp_servers`.
+
 ## Memory maintenance
 
 During the exit review, Jinni flags facts that look similar to saved facts so you can decide whether to keep both or skip the new one. Use `/prune DAYS` to review session notes older than that many days; Jinni shows a preview and asks before deleting. Saved facts are not pruned.

@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import math
 import os
 import re
 import shutil
@@ -77,6 +78,146 @@ def build_parameters(tool: Any) -> dict[str, Any]:
     if not isinstance(schema, dict) or schema.get("type") != "object":
         return {"type": "object", "properties": {}}
     return shrink_schema(schema)
+
+
+def _matches_type(value: Any, expected: str) -> bool:
+    return {
+        "object": lambda: isinstance(value, dict),
+        "array": lambda: isinstance(value, list),
+        "string": lambda: isinstance(value, str),
+        "boolean": lambda: isinstance(value, bool),
+        "integer": lambda: isinstance(value, int) and not isinstance(value, bool),
+        "number": lambda: isinstance(value, (int, float)) and not isinstance(value, bool)
+        and math.isfinite(value),
+        "null": lambda: value is None,
+    }.get(expected, lambda: False)()
+
+
+def _resolve_schema_ref(root: dict[str, Any], reference: str) -> dict[str, Any] | None:
+    if reference == "#":
+        return root
+    if not reference.startswith("#/"):
+        return None
+    current: Any = root
+    for part in reference[2:].split("/"):
+        key = part.replace("~1", "/").replace("~0", "~")
+        if not isinstance(current, dict) or key not in current:
+            return None
+        current = current[key]
+    return current if isinstance(current, dict) else None
+
+
+def _schema_errors(schema: Any, value: Any, root: dict[str, Any], path: str = "$",
+                   depth: int = 0) -> list[str]:
+    if depth > 32 or not isinstance(schema, dict):
+        return [f"{path} has an unsupported schema"]
+
+    if "$ref" in schema:
+        target = _resolve_schema_ref(root, schema["$ref"])
+        if target is None:
+            return [f"{path} uses an unsupported schema reference"]
+        siblings = {key: item for key, item in schema.items() if key != "$ref"}
+        return (_schema_errors(target, value, root, path, depth + 1)
+                + _schema_errors(siblings, value, root, path, depth + 1) if siblings else
+                _schema_errors(target, value, root, path, depth + 1))
+
+    for choice in ("anyOf", "oneOf"):
+        if choice in schema:
+            branches = schema[choice]
+            if not isinstance(branches, list) or not branches:
+                return [f"{path} has an invalid {choice} schema"]
+            valid = [not _schema_errors(branch, value, root, path, depth + 1) for branch in branches]
+            matched = sum(valid)
+            if matched == 0 or (choice == "oneOf" and matched != 1):
+                return [f"{path} does not match the {choice} schema"]
+    if "allOf" in schema:
+        branches = schema["allOf"]
+        if not isinstance(branches, list):
+            return [f"{path} has an invalid allOf schema"]
+        errors = [error for branch in branches
+                  for error in _schema_errors(branch, value, root, path, depth + 1)]
+        if errors:
+            return errors[:8]
+
+    expected = schema.get("type")
+    if expected is not None:
+        types = expected if isinstance(expected, list) else [expected]
+        if not types or not all(isinstance(item, str) for item in types):
+            return [f"{path} has an invalid type schema"]
+        if not any(_matches_type(value, item) for item in types):
+            expected_text = " or ".join(types)
+            return [f"{path} must be {expected_text}"]
+
+    if "enum" in schema and value not in schema["enum"]:
+        return [f"{path} is not an allowed value"]
+    if "const" in schema and value != schema["const"]:
+        return [f"{path} must equal the declared value"]
+
+    errors: list[str] = []
+    if isinstance(value, dict):
+        properties = schema.get("properties", {})
+        required = schema.get("required", [])
+        if not isinstance(properties, dict) or not isinstance(required, list):
+            return [f"{path} has an invalid object schema"]
+        for name in required:
+            if not isinstance(name, str):
+                return [f"{path} has an invalid required field"]
+            if name not in value:
+                errors.append(f"{path}.{name} is required")
+        extra = schema.get("additionalProperties", True)
+        for name, item in value.items():
+            child_path = f"{path}.{name}"
+            if name in properties:
+                errors.extend(_schema_errors(properties[name], item, root, child_path, depth + 1))
+            elif extra is False:
+                errors.append(f"{child_path} is not allowed")
+            elif isinstance(extra, dict):
+                errors.extend(_schema_errors(extra, item, root, child_path, depth + 1))
+        for keyword, relation in (("minProperties", lambda n, bound: n >= bound),
+                                  ("maxProperties", lambda n, bound: n <= bound)):
+            if keyword in schema and not relation(len(value), schema[keyword]):
+                errors.append(f"{path} violates {keyword}")
+    elif isinstance(value, list):
+        for keyword, relation in (("minItems", lambda n, bound: n >= bound),
+                                  ("maxItems", lambda n, bound: n <= bound)):
+            if keyword in schema and not relation(len(value), schema[keyword]):
+                errors.append(f"{path} violates {keyword}")
+        if schema.get("uniqueItems") and len(value) != len({json.dumps(item, sort_keys=True) for item in value}):
+            errors.append(f"{path} items must be unique")
+        item_schema = schema.get("items")
+        if isinstance(item_schema, dict):
+            for index, item in enumerate(value):
+                errors.extend(_schema_errors(item_schema, item, root, f"{path}[{index}]", depth + 1))
+    elif isinstance(value, str):
+        if "minLength" in schema and len(value) < schema["minLength"]:
+            errors.append(f"{path} is shorter than minLength")
+        if "maxLength" in schema and len(value) > schema["maxLength"]:
+            errors.append(f"{path} is longer than maxLength")
+        if "pattern" in schema:
+            try:
+                if re.search(schema["pattern"], value) is None:
+                    errors.append(f"{path} does not match the required pattern")
+            except (TypeError, re.error):
+                errors.append(f"{path} has an invalid pattern schema")
+    elif isinstance(value, (int, float)) and not isinstance(value, bool):
+        for keyword, relation in (("minimum", lambda n, bound: n >= bound),
+                                  ("maximum", lambda n, bound: n <= bound),
+                                  ("exclusiveMinimum", lambda n, bound: n > bound),
+                                  ("exclusiveMaximum", lambda n, bound: n < bound)):
+            if keyword in schema and not relation(value, schema[keyword]):
+                errors.append(f"{path} violates {keyword}")
+    return errors[:8]
+
+
+def validate_arguments(schema: Any, arguments: Any) -> list[str]:
+    if not isinstance(schema, dict) or schema.get("type") != "object":
+        return ["the server did not advertise an object input schema"]
+    if not isinstance(arguments, dict):
+        return ["tool arguments must be a JSON object"]
+    try:
+        return _schema_errors(schema, arguments, schema)
+    except (TypeError, ValueError, OverflowError):
+        return ["the server advertised an invalid input schema"]
 
 
 def format_result(result: Any, server: str, limit: int | None = None) -> str:
@@ -223,10 +364,24 @@ class McpServer:
         except Exception:
             return False
 
+    def _argument_error(self, tool: str, arguments: Any) -> str | None:
+        if tool not in self.cfg.tools:
+            return f"'{clean(tool)}' is not allowlisted for MCP server '{clean(self.cfg.name)}'"
+        offered = next((item for item in self.tools if item.name == tool), None)
+        if offered is None:
+            return f"MCP server '{clean(self.cfg.name)}' does not offer '{clean(tool)}'"
+        errors = validate_arguments(getattr(offered, "input_schema", None), arguments)
+        if errors:
+            return f"invalid arguments for '{clean(tool)}': {plain('; '.join(errors))}"
+        return None
+
     async def call(self, tool: str, arguments: dict[str, Any]) -> str:
         client = self.client
         if self.state != "up" or client is None:
             return f"Error: the MCP server '{clean(self.cfg.name)}' is not running. The user can type /mcp to check on it."
+        argument_error = self._argument_error(tool, arguments)
+        if argument_error:
+            return f"Error: {argument_error}."
         try:
             result = await asyncio.wait_for(client.call_tool(tool, arguments), timeout=self.cfg.call_timeout)
         except asyncio.TimeoutError:
@@ -244,6 +399,9 @@ class McpServer:
         client = self.client
         if self.state != "up" or client is None:
             raise RuntimeError(f"the MCP server '{clean(self.cfg.name)}' is not running")
+        argument_error = self._argument_error(tool, arguments)
+        if argument_error:
+            raise ValueError(argument_error)
         try:
             result = await asyncio.wait_for(client.call_tool(tool, arguments), timeout=self.cfg.call_timeout)
         except asyncio.TimeoutError:
