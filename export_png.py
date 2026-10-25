@@ -59,7 +59,8 @@ def parse_export_options(text: str) -> tuple[str, str | None, int | None, int | 
             if name is not None:
                 raise ValueError("use /png [chart] [light|dark] [WIDTHxHEIGHT]")
             name = part
-    return name or "", theme, *(size or (None, None))
+    width, height = size if size is not None else (None, None)
+    return name or "", theme, width, height
 
 
 def png_size(data: bytes) -> tuple[int, int] | None:

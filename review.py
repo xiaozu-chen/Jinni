@@ -10,11 +10,11 @@ def review(store: MemoryStore, proposals: list[Proposal]) -> int:
     total = len(proposals)
     print(f"  Jinni would like to remember {total} thing(s).")
     print("  y = save   n = skip    e = edit first  q = stop reviewing")
-    for i, proposals in enumerate(proposals, 1):
-        label = "fact" if proposals.kind == "fact" else "session note"
-        text = proposals.text
+    for i, proposal in enumerate(proposals, 1):
+        label = "fact" if proposal.kind == "fact" else "session note"
+        text = proposal.text
         while True:
-            related = store.similar_facts(text) if proposals.kind == "fact" else []
+            related = store.similar_facts(text) if proposal.kind == "fact" else []
             if related:
                 print("  This fact may overlap with saved fact(s):")
                 for item in related:
@@ -34,7 +34,7 @@ def review(store: MemoryStore, proposals: list[Proposal]) -> int:
         if answer != "y":
             continue
         try:
-            store.add(proposals.kind, text)
+            store.add(proposal.kind, text)
             saved += 1
         except Rejected as e:
             print(f"  (not saved: {e})")

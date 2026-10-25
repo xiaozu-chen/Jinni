@@ -42,7 +42,9 @@ def test_line_chart_has_one_line_and_one_dot_per_value():
 def test_negative_values_give_valid_bars():
     root = parse(svgcharts.bar_chart(["a", "b"], [-4, 6], "T", "x", "y"))
     for rect in root.findall(f".//{SVG}rect"):
-        assert float(rect.get("height")) >= 0
+        height = rect.get("height")
+        assert height is not None
+        assert float(height) >= 0
 
 
 def test_flat_data_still_renders():
@@ -94,7 +96,7 @@ def test_big_numbers_get_short_axis_labels():
     root = parse(svgcharts.bar_chart(["a", "b"], [1_450_935_791, 233_740_000], "T", "x", "y"))
     ticks = [t.text for t in root.findall(f".//{SVG}text") if t.get("class") == "tick"]
     assert ticks
-    assert all(len(t) <= 6 for t in ticks)
+    assert all(tick is not None and len(tick) <= 6 for tick in ticks)
 
 
 def slices(root):
@@ -136,7 +138,12 @@ def test_stacked_bars_stack_each_series_from_the_prior_total():
     root = parse(svgcharts.stacked_bar_chart(["a", "b"], {"x": [2, -1], "y": [3, -4]}, "T", "k", "v"))
     bars = rects_with(root, "bar")
     assert len(bars) == 4
-    assert [b.find(f"{SVG}title").text for b in bars] == [
+    titles = [bar.find(f"{SVG}title") for bar in bars]
+    title_texts = []
+    for title in titles:
+        assert title is not None and title.text is not None
+        title_texts.append(title.text)
+    assert title_texts == [
         "a · x: 2", "b · x: -1", "a · y: 3", "b · y: -4",
     ]
 
@@ -206,13 +213,17 @@ def test_pie_groups_the_tail_into_other():
 
 def test_pie_percentages_add_up():
     root = parse(svgcharts.pie_chart(["a", "b", "c"], [1, 1, 1], "T"))
-    pct = [float(t.text.rstrip("%")) for t in root.findall(f".//{SVG}text") if t.get("class") == "legend-value"]
+    values = [t.text for t in root.findall(f".//{SVG}text") if t.get("class") == "legend-value"]
+    assert all(value is not None for value in values)
+    pct = [float(value.rstrip("%")) for value in values if value is not None]
     assert abs(sum(pct) - 100) < 1
 
 
 def test_slices_over_half_use_the_large_arc_flag():
     root = parse(svgcharts.pie_chart(["big", "small"], [3, 1], "T"))
-    big, small = [p.get("d") for p in slices(root)]
+    paths = slices(root)
+    big, small = paths[0].get("d"), paths[1].get("d")
+    assert big is not None and small is not None
     assert " 0 1 1 " in big
     assert " 0 0 1 " in small
 

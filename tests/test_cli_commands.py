@@ -6,7 +6,15 @@ import pytest
 
 from config import McpServerConfig, load_settings, settings
 from agent import Agent
-from jinni import config_text, enable_input_history, help_text, show_memories, stats_text, undo_last_turn
+from jinni import (
+    config_text,
+    enable_input_history,
+    help_text,
+    mcp_restart_target,
+    show_memories,
+    stats_text,
+    undo_last_turn,
+)
 
 
 def test_help_lists_the_interactive_commands():
@@ -18,6 +26,13 @@ def test_help_lists_the_interactive_commands():
     assert "/save [NAME]" in help_output
     assert "/load NAME" in help_output
     assert "exit" in help_output
+
+
+def test_mcp_restart_target_parses_all_or_one_server():
+    assert mcp_restart_target("restart") == ""
+    assert mcp_restart_target("restart fixture") == "fixture"
+    assert mcp_restart_target("restart  fixture  ") == "fixture"
+    assert mcp_restart_target("status") is None
 
 
 def test_input_history_stays_off_for_non_interactive_streams(monkeypatch):

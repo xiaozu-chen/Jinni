@@ -153,6 +153,13 @@ def enable_input_history() -> bool:
     return True
 
 
+def mcp_restart_target(argument: str) -> str | None:
+    command, separator, target = argument.partition(" ")
+    if command != "restart":
+        return None
+    return target.strip() if separator else ""
+
+
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description="Jinni local AI agent")
     parser.add_argument("--project", help="copy this project into the Jinni workspace before editing")
@@ -174,8 +181,9 @@ def main(argv: list[str] | None = None) -> None:
         parser.error(str(error))
 
     for stream in (sys.stdout, sys.stdin):
-        if hasattr(stream, "reconfigure"):
-            stream.reconfigure(encoding="utf-8")
+        reconfigure = getattr(stream, "reconfigure", None)
+        if callable(reconfigure):
+            reconfigure(encoding="utf-8")
     setup_logging()
     enable_input_history()
     log.info("started, model=%s", settings.model)
@@ -386,10 +394,11 @@ def main(argv: list[str] | None = None) -> None:
                         print(f"  (embeddings server not reachable: {e})")
                     continue
                 if cmd == "/mcp":
+                    restart_target = mcp_restart_target(arg)
                     if manager is None:
                         print("  (MCP is turned off in config.py)")
-                    elif arg.startswith("restart"):
-                        for line in runner.run(manager.restart(arg[len("restart"):].startswith())):
+                    elif restart_target is not None:
+                        for line in runner.run(manager.restart(restart_target)):
                             print(line)
                     else:
                         for line in manager.status_lines():

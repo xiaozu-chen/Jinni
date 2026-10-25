@@ -25,7 +25,10 @@ log = logging.getLogger("jinni.agent")
 RETRYABLE = (openai.APIConnectionError, openai.InternalServerError)
 DECLINED = "The user declined this action. It was their choice, not a technical error. Do not retry; ask what they want instead."
 
-def authorize(call: ToolCall, allowed: set[str, str] | None = None) -> tuple[dict[str, Any] | None, str]:
+def authorize(
+    call: ToolCall,
+    allowed: set[tuple[str, str]] | None = None,
+) -> tuple[dict[str, Any] | None, str]:
     # Returns (args, "") if the call may run, or (None, message_for_the_model).
     allowed = set() if allowed is None else allowed
     try:
