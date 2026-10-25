@@ -27,6 +27,17 @@ def test_edit_then_save(memory_store, monkeypatch):
     assert memory_store.facts()[0].text == "The user's name is Carlo."
 
 
+def test_possible_fact_conflict_is_shown_before_saving_both(memory_store, monkeypatch, capsys):
+    memory_store.add("fact", "Likes tea.")
+
+    assert run_review(memory_store, monkeypatch, ["y"], [
+        Proposal("fact", "Likes coffee.")
+    ]) == 1
+
+    assert "may overlap with saved fact" in capsys.readouterr().out
+    assert [item.text for item in memory_store.facts()] == ["Likes tea.", "Likes coffee."]
+
+
 def test_quit_stops(memory_store, monkeypatch):
     assert run_review(memory_store, monkeypatch, ["q"], [FACT, NOTE]) == 0
     assert memory_store.counts() == (0, 0)

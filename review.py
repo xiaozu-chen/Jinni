@@ -10,7 +10,15 @@ def review(store: MemoryStore, proposals: list[Proposal]) -> int:
         label = "fact" if proposals.kind == "fact" else "session note"
         text = proposals.text
         while True:
-            answer = input(f"  [{i}/{total}] {label}: {text}\n  save? (y/n/e/q) > ").strip().lower()
+            related = store.similar_facts(text) if proposals.kind == "fact" else []
+            if related:
+                print("  This fact may overlap with saved fact(s):")
+                for item in related:
+                    print(f"    #{item.id}: {item.text}")
+                prompt = "  save both? (y/n/e/q) > "
+            else:
+                prompt = "  save? (y/n/e/q) > "
+            answer = input(f"  [{i}/{total}] {label}: {text}\n{prompt}").strip().lower()
             if answer == "e":
                 edited = input("  new text > ").strip()
                 if edited:

@@ -18,3 +18,7 @@ Chart export commands save files beside the HTML chart:
 `fetch_table(url, table_index)` saves a public HTML table as a CSV and records the source URL, fetch time, and content hash in a provenance sidecar. Charts made from that CSV retain the source and date.
 
 To bridge data from MCP, configure an allowlisted server tool that returns JSON with `columns` and `rows`, then use `/mcp-table <server> <tool> [JSON arguments]`. The repository includes a local sales fixture at `tests/fixtures/chart_data_server.py`; add it as an MCP server in `Settings.mcp_servers` to try `/mcp-table fixture get_table {"dataset":"sales"}`.
+
+## Memory maintenance
+
+During the exit review, Jinni flags facts that look similar to saved facts so you can decide whether to keep both or skip the new one. Use `/prune DAYS` to review session notes older than that many days; Jinni shows a preview and asks before deleting. Saved facts are not pruned.

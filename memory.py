@@ -3,6 +3,7 @@ import sqlite3
 import threading
 from dataclasses import dataclass
 from datetime import date
+from difflib import SequenceMatcher
 from functools import lru_cache
 from pathlib import Path
 
@@ -100,6 +101,61 @@ class MemoryStore:
                 "SELECT id, kind, text, created FROM memories WHERE kind = 'fact' ORDER BY id"
             ).fetchall()
         return [Memory(*r) for r in rows]
+
+    def similar_facts(self, text: str, limit: int = 3) -> list[Memory]:
+        """Find facts that may describe the same preference or detail."""
+        normalized = " ".join(text.casefold().split())
+        words = set(re.findall(r"\w+", normalized))
+        if not words:
+            return []
+        with self.lock:
+            rows = self.conn.execute(
+                "SELECT id, kind, text, created FROM memories WHERE kind = 'fact' ORDER BY id"
+            ).fetchall()
+        matches = []
+        for row in rows:
+            memory = Memory(*row)
+            known = " ".join(memory.text.casefold().split())
+            known_words = set(re.findall(r"\w+", known))
+            union = words | known_words
+            overlap = len(words & known_words) / len(union) if union else 0.0
+            similarity = max(overlap, SequenceMatcher(None, normalized, known).ratio())
+            if similarity >= 0.45:
+                matches.append((similarity, memory))
+        matches.sort(key=lambda pair: (-pair[0], pair[1].id))
+        return [memory for _score, memory in matches[:max(0, limit)]]
+
+    def count_events_before(self, cutoff: date) -> int:
+        with self.lock:
+            row = self.conn.execute(
+                "SELECT COUNT(*) FROM memories WHERE kind = 'event' AND created < ?",
+                (cutoff.isoformat(),),
+            ).fetchone()
+        return row[0]
+
+    def events_before(self, cutoff: date, limit: int = 10) -> list[Memory]:
+        with self.lock:
+            rows = self.conn.execute(
+                "SELECT id, kind, text, created FROM memories "
+                "WHERE kind = 'event' AND created < ? ORDER BY created, id LIMIT ?",
+                (cutoff.isoformat(), max(0, limit)),
+            ).fetchall()
+        return [Memory(*row) for row in rows]
+
+    def prune_events_before(self, cutoff: date) -> int:
+        with self.lock, self.conn:
+            predicate = "kind = 'event' AND created < ?"
+            params = (cutoff.isoformat(),)
+            self.conn.execute(
+                f"DELETE FROM memories_fts WHERE rowid IN (SELECT id FROM memories WHERE {predicate})",
+                params,
+            )
+            self.conn.execute(
+                f"DELETE FROM embeddings WHERE memory_id IN (SELECT id FROM memories WHERE {predicate})",
+                params,
+            )
+            cur = self.conn.execute(f"DELETE FROM memories WHERE {predicate}", params)
+        return cur.rowcount
 
     def list_all(self) -> list[Memory]:
         with self.lock:

@@ -2,6 +2,7 @@ import asyncio
 import json
 import sys
 import logging
+from datetime import date, timedelta
 
 import webbrowser
 from config import settings
@@ -96,6 +97,30 @@ def main() -> None:
                     continue
                 if cmd == "/forget":
                     forget_command(agent, arg.strip())
+                    continue
+                if cmd == "/prune":
+                    raw_days = arg.strip()
+                    try:
+                        days = int(raw_days)
+                    except ValueError:
+                        days = 0
+                    if not 1 <= days <= 36500:
+                        print("  (usage: /prune DAYS — choose 1 to 36500 days)")
+                        continue
+                    cutoff = date.today() - timedelta(days=days)
+                    count = agent.memory.count_events_before(cutoff)
+                    if not count:
+                        print(f"  (no session notes older than {cutoff.isoformat()})")
+                        continue
+                    print(f"  {count} session note(s) are older than {cutoff.isoformat()}:")
+                    for item in agent.memory.events_before(cutoff):
+                        print(f"    #{item.id} {item.created} {item.text}")
+                    if count > 10:
+                        print(f"    ... and {count - 10} more")
+                    if input("  delete these session notes? (y/n) > ").strip().lower() == "y":
+                        print(f"  ({agent.memory.prune_events_before(cutoff)} session note(s) pruned)")
+                    else:
+                        print("  (nothing pruned)")
                     continue
                 if cmd == "/open":
                     page = find_chart(arg.strip())

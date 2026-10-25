@@ -1,5 +1,6 @@
 import asyncio
 from dataclasses import replace
+from datetime import date, timedelta
 
 import pytest
 
@@ -56,6 +57,37 @@ def test_search_survives_weird_queries(memory_store):
     memory_store.add("fact", "Likes cats.")
     for query in ["AND OR NOT", '"', "NEAR(", "*", "", "   ", "what's"]:
         assert isinstance(memory_store.search(query), list)
+
+
+def test_similar_facts_surfaces_possible_conflicts(memory_store):
+    saved = memory_store.add("fact", "Likes tea.")
+
+    matches = memory_store.similar_facts("Likes coffee.")
+
+    assert [item.id for item in matches] == [saved.id]
+    assert memory_store.similar_facts("Moved to Toronto.") == []
+
+
+def test_prune_events_before_keeps_recent_facts_and_cleans_indexes(memory_store):
+    old = memory_store.add("event", "Read an old report about radioisotopes.")
+    recent = memory_store.add("event", "Read a recent report about radioisotopes.")
+    fact = memory_store.add("fact", "Likes cats.")
+    cutoff = date.today() - timedelta(days=30)
+    with memory_store.conn:
+        memory_store.conn.execute(
+            "UPDATE memories SET created = ? WHERE id = ?",
+            ((cutoff - timedelta(days=1)).isoformat(), old.id),
+        )
+    memory_store.save_vector(old.id, "test-model", 1, b"\x00\x00\x80?")
+
+    assert memory_store.count_events_before(cutoff) == 1
+    assert [item.id for item in memory_store.events_before(cutoff)] == [old.id]
+    assert memory_store.prune_events_before(cutoff) == 1
+    assert memory_store.get(old.id) is None
+    assert memory_store.get(recent.id) is not None
+    assert memory_store.get(fact.id) is not None
+    assert memory_store.search("old") == []
+    assert memory_store.load_vectors("test-model") == []
 
 
 def test_delete_removes_from_search_too(memory_store):
