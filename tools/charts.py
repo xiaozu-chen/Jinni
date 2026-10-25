@@ -1,5 +1,6 @@
 import csv
 import io
+import logging
 import math
 import posixpath
 import re
@@ -12,6 +13,8 @@ from chart_records import record_genuine_chart
 from .registry import tool
 from .provenance import read_csv_provenance
 from .workspace import CHART_DIR, safe_path, was_written
+
+log = logging.getLogger("jinni.tools.charts")
 
 MAX_ROWS = 50
 MAX_CSV_BYTES = 200_000
@@ -223,4 +226,5 @@ def make_chart(file: str, x_column: str, y_column: str, kind: str = "bar", title
     except FileNotFoundError:
         return f"Error: '{file}' was not found in the workspace."
     except Exception as e:
+        log.exception("make_chart failed for %s", file)
         return f"Error: {e}"

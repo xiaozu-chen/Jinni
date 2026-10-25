@@ -1,9 +1,12 @@
 import difflib
 import json
 import ast
+import logging
 
 from tools import workspace
 from tools.workspace import safe_path
+
+log = logging.getLogger("jinni.approval_preview")
 
 MAX_ARGUMENT_SUMMARY = 320
 MAX_PREVIEW_BYTES = 100_000
@@ -60,6 +63,7 @@ def change_preview(tool_name: str, arguments: dict) -> str | None:
         heading = "Existing file will be overwritten." if tool_name == "write_file" and full.exists() else ""
         return f"{heading}\n{output.rstrip()}" if heading else output.rstrip()
     except Exception as error:
+        log.exception("could not prepare %s preview", tool_name)
         return f"Change preview unavailable: {type(error).__name__}."
 
 

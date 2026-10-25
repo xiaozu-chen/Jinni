@@ -1,6 +1,7 @@
 import ipaddress
 import csv
 import io
+import logging
 import re
 import socket
 from html.parser import HTMLParser
@@ -22,6 +23,7 @@ MAX_TABLE_ROWS = 50
 MAX_TRUSTED_URLS = 500
 URL_PATTERN = re.compile(r"https?://[^\s<>\"']+", re.IGNORECASE)
 TRUSTED_URLS: set[str] = set()
+log = logging.getLogger("jinni.tools.web")
 
 
 def _estimate_tokens(text: str) -> int:
@@ -265,6 +267,7 @@ def fetch_url(url: str) -> str:
     except ValueError as e:
         return f"Error: {e}."
     except Exception as e:
+        log.exception("fetch_url failed unexpectedly")
         return f"Error: {e}"
 
 
@@ -297,4 +300,5 @@ def fetch_table(url: str, table_index: int = 0) -> str:
     except httpx.HTTPError as e:
         return f"Error: could not fetch the page ({type(e).__name__})."
     except Exception as e:
+        log.exception("fetch_table failed unexpectedly")
         return f"Error: {e}"

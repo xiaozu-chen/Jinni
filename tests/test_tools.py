@@ -196,6 +196,20 @@ def test_fetch_refuses_localhost():
     assert fetch_url("http://localhost:8080").startswith("Error")
 
 
+def test_unexpected_fetch_error_is_logged_with_traceback(monkeypatch, caplog):
+    def broken_fetch(_url):
+        raise RuntimeError("fixture defect")
+
+    monkeypatch.setattr(web, "_fetch_page", broken_fetch)
+
+    assert fetch_url("https://example.com").startswith("Error:")
+    assert any(
+        record.name == "jinni.tools.web" and record.exc_info
+        and record.exc_info[0] is RuntimeError
+        for record in caplog.records
+    )
+
+
 def test_fetch_extracts_text(monkeypatch):
     page = "<html><head><title>t</title></head><body><script>bad()</script><p>Hello</p></body></html>"
 

@@ -1,0 +1,6 @@
+# Direct runtime dependencies. Keep httpx explicit because the app imports it.
+ddgs==9.16.1
+httpx==0.28.1
+mcp>=2,<3
+numpy==2.4.6
+openai==3.35.1

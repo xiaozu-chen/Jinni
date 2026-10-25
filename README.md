@@ -2,6 +2,17 @@
 
 ![alt text](tn.jpg)
 
+## Development setup
+
+Use Python 3.11 on Windows, then install the checked-in environment and quality tools:
+
+```powershell
+python -m pip install -r requirements-lock.txt -r requirements-dev.txt
+pre-commit install
+```
+
+Run `python -m pytest`, `ruff check .`, and `pyright` before opening a pull request. CI runs the same checks on pushes and pull requests.
+
 ## Charts and data
 
 `make_chart` reads CSV files and `.xlsx` workbooks from the workspace. Excel input uses the first worksheet; legacy `.xls` files are not supported. Tables can contain up to 50 data rows.

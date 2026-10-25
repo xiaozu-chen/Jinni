@@ -1,5 +1,6 @@
 import ast
 import fnmatch
+import logging
 import os
 import re
 import shutil
@@ -20,6 +21,7 @@ MAX_PATTERN_CHARS = 256
 MAX_DEPTH = 10
 MAX_OUTPUT_CHARS = 12000
 SKIP_DIRS = {".git", ".venv", "venv", "__pycache__", "node_modules", ".pytest_cache", ".trash", ".jinni"}
+log = logging.getLogger("jinni.tools.files")
 
 
 def _workspace_entries(base: Path, max_depth: int = MAX_DEPTH):
@@ -77,7 +79,8 @@ def list_files(path: str = ".") -> str:
         return "\n".join(item.name for item in folder.iterdir()) or "(empty folder)"
     except FileNotFoundError:
         return f"Error: '{path}' was not found in the workspace."
-    except Exception as e:
+    except (OSError, ValueError) as e:
+        log.warning("list_files could not list %s: %s", path, e)
         return f"Error: {e}"
 
 
@@ -114,7 +117,8 @@ def read_file(path: str, start: int = 0, end: int = 0) -> str:
         return output
     except FileNotFoundError:
         return f"Error: '{path}' was not found in the workspace."
-    except Exception as e:
+    except (OSError, UnicodeError, ValueError) as e:
+        log.warning("read_file could not read %s: %s", path, e)
         return f"Error: {e}"
 
 
@@ -175,7 +179,8 @@ def search_files(query: str, path: str = ".", regex: bool = False) -> str:
         return _bounded_output(hits, capped=scan_capped)
     except FileNotFoundError:
         return f"Error: '{path}' was not found in the workspace."
-    except Exception as e:
+    except (OSError, ValueError) as e:
+        log.warning("search_files could not search %s: %s", path, e)
         return f"Error: {e}"
 
 
@@ -210,7 +215,8 @@ def find_files(pattern: str, path: str = ".") -> str:
         return _bounded_output(found, capped=scan_capped)
     except FileNotFoundError:
         return f"Error: '{path}' was not found in the workspace."
-    except Exception as e:
+    except (OSError, ValueError) as e:
+        log.warning("find_files could not scan %s: %s", path, e)
         return f"Error: {e}"
 
 
@@ -237,7 +243,8 @@ def code_outline(path: str) -> str:
         return f"Error: '{path}' was not found in the workspace."
     except SyntaxError as e:
         return f"Error: syntax error on line {e.lineno}: {e.msg}"
-    except Exception as e:
+    except (OSError, UnicodeError, ValueError) as e:
+        log.warning("code_outline could not read %s: %s", path, e)
         return f"Error: {e}"
 
 
@@ -288,7 +295,8 @@ def project_tree(path: str = ".", max_depth: int = 3, max_entries: int = 300) ->
         return _bounded_output(lines, capped=truncated or remaining == 0)
     except FileNotFoundError:
         return f"Error: '{path}' was not found in the workspace."
-    except Exception as e:
+    except (OSError, ValueError) as e:
+        log.warning("project_tree could not scan %s: %s", path, e)
         return f"Error: {e}"
 
 
@@ -307,7 +315,8 @@ def write_file(path: str, content: str) -> str:
         full.write_text(content, encoding="utf-8")
         mark_written(full)
         return f"Wrote {len(content)} characters to {path}"
-    except Exception as e:
+    except (OSError, UnicodeError, ValueError) as e:
+        log.warning("write_file could not write %s: %s", path, e)
         return f"Error: {e}"
 
 
@@ -336,7 +345,8 @@ def edit_file(path: str, old_text: str, new_text: str) -> str:
         return f"Edited {path}: replaced 1 occurrence."
     except FileNotFoundError:
         return f"Error: '{path}' was not found in the workspace."
-    except Exception as e:
+    except (OSError, UnicodeError, ValueError) as e:
+        log.warning("edit_file could not edit %s: %s", path, e)
         return f"Error: {e}"
 
 
@@ -366,5 +376,6 @@ def delete_file(path: str) -> str:
                 index += 1
         shutil.move(str(full), str(target))
         return f"Moved {path} to .trash/{relative.as_posix()}"
-    except Exception as e:
+    except (OSError, ValueError, shutil.Error) as e:
+        log.warning("delete_file could not move %s to trash: %s", path, e)
         return f"Error: {e}"
