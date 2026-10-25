@@ -1,4 +1,5 @@
 import asyncio
+import sqlite3
 from dataclasses import replace
 from datetime import date, timedelta
 
@@ -14,6 +15,33 @@ def test_add_and_list_facts_before_events(memory_store):
     memory_store.add("fact", "Likes cats.")
     assert [m.kind for m in memory_store.list_all()] == ["fact", "event"]
     assert [m.text for m in memory_store.facts()] == ["Likes cats."]
+    assert all(item.session_id == memory_store.session_id for item in memory_store.list_all())
+
+
+def test_memory_provenance_survives_reopening_database(tmp_path):
+    path = tmp_path / "memories.db"
+    first_session = memory.MemoryStore(path)
+    saved = first_session.add("fact", "Likes cats.")
+    second_session = memory.MemoryStore(path)
+
+    assert second_session.session_id != first_session.session_id
+    assert second_session.get(saved.id).session_id == first_session.session_id
+
+
+def test_existing_memory_database_gets_provenance_column(tmp_path):
+    path = tmp_path / "old.db"
+    connection = sqlite3.connect(path)
+    connection.execute(
+        "CREATE TABLE memories (id INTEGER PRIMARY KEY, kind TEXT NOT NULL, text TEXT NOT NULL, created TEXT NOT NULL)"
+    )
+    connection.execute("INSERT INTO memories VALUES (1, 'fact', 'old fact', '2020-01-01')")
+    connection.commit()
+    connection.close()
+
+    store = memory.MemoryStore(path)
+
+    assert store.get(1).session_id == ""
+    assert store.add("fact", "new fact").session_id == store.session_id
 
 
 def test_duplicates_are_rejected_ignoring_case(memory_store):

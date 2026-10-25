@@ -128,6 +128,7 @@ def test_tools_run_in_parallel(monkeypatch):
 
     assert results == ["done"] * 3
     assert time.perf_counter() - start < 0.7
+    assert agent.tool_counts == {"slow": 3}
 
 
 def test_tools_run_one_by_one_when_parallel_is_off(monkeypatch):
@@ -245,6 +246,21 @@ def test_system_prompt_contains_saved_facts(memory_store):
     memory_store.clear()
     agent.apply_memory()
     assert "Carl" not in agent.messages[0]["content"]
+
+
+def test_saved_facts_respect_prompt_character_budget(memory_store, monkeypatch):
+    memory_store.add("fact", "old-" + "o" * 120)
+    memory_store.add("fact", "new-" + "n" * 120)
+    monkeypatch.setattr(agent_mod, "settings", replace(agent_mod.settings, memory_prompt_chars=300))
+
+    agent = Agent()
+    prompt = agent.messages[0]["content"]
+
+    memory_block = prompt.split("What you remember", 1)[1]
+    assert len("What you remember" + memory_block) <= 300
+    assert "new-" in memory_block
+    assert "old-" not in memory_block
+    assert "omitted" in memory_block
 
 
 def test_proposals_come_from_the_model_reply(monkeypatch):

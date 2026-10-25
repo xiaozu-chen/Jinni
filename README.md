@@ -23,11 +23,13 @@ MCP tool calls are checked against each server's advertised input schema before 
 
 ## Memory maintenance
 
-During the exit review, Jinni flags facts that look similar to saved facts so you can decide whether to keep both or skip the new one. Use `/prune DAYS` to review session notes older than that many days; Jinni shows a preview and asks before deleting. Saved facts are not pruned.
+During the exit review, Jinni flags facts that look similar to saved facts so you can decide whether to keep both or skip the new one. It also offers old facts for deletion; keeping one snoozes that prompt for another year. Use `/prune DAYS` to review session notes older than that many days; Jinni shows a preview and asks before deleting. Saved facts are not pruned automatically.
+
+Use `/memory facts`, `/memory events`, or `/memory search TEXT` to filter saved memories. Each item shows its source session; memory facts added to the system prompt are capped at 2,400 characters.
 
 ## CLI shortcuts
 
-Use `/help` for the command list, `/config` to inspect non-sensitive effective settings, and `/undo` to remove the latest chat turn from conversation history. `/undo` does not reverse file or other tool side effects.
+Use `/help` for the command list, `/config` to inspect non-sensitive effective settings, `/stats` for session usage totals, and `/undo` to remove the latest chat turn from conversation history. `/undo` does not reverse file or other tool side effects.
 
 During a chat, Jinni can ask a clarifying question and keep a session task list with `task_list` actions `list`, `add`, `done`, `remove`, and `clear`; `/tasks` displays it. At the configured step limit, it asks before continuing another block of tool calls.
 

@@ -1,5 +1,7 @@
+from datetime import date, timedelta
+
 from memory import Proposal
-from review import review
+from review import review, review_stale_facts
 
 FACT = Proposal("fact", "The user's name is Carl.")
 NOTE = Proposal("event", "Read mm.txt.")
@@ -46,3 +48,32 @@ def test_quit_stops(memory_store, monkeypatch):
 def test_rejected_item_does_not_crash(memory_store, monkeypatch):
     memory_store.add("fact", FACT.text)
     assert run_review(memory_store, monkeypatch, ["y"], [FACT]) == 0
+
+
+def test_exit_review_offers_old_facts_forgetting(memory_store, monkeypatch):
+    saved = memory_store.add("fact", "Old preference.")
+    with memory_store.conn:
+        memory_store.conn.execute(
+            "UPDATE memories SET created = ? WHERE id = ?",
+            ((date.today() - timedelta(days=400)).isoformat(), saved.id),
+        )
+    prompts = []
+    monkeypatch.setattr("builtins.input", lambda prompt: prompts.append(prompt) or "d")
+
+    assert review_stale_facts(memory_store) == 1
+    assert memory_store.get(saved.id) is None
+    assert "Old preference." in prompts[0]
+
+
+def test_exit_review_keeps_stale_facts_when_user_says_keep(memory_store, monkeypatch):
+    saved = memory_store.add("fact", "Old preference.")
+    with memory_store.conn:
+        memory_store.conn.execute(
+            "UPDATE memories SET created = ? WHERE id = ?",
+            ((date.today() - timedelta(days=400)).isoformat(), saved.id),
+        )
+    monkeypatch.setattr("builtins.input", lambda _: "k")
+
+    assert review_stale_facts(memory_store) == 0
+    assert memory_store.get(saved.id) is not None
+    assert review_stale_facts(memory_store, days=1) == 0

@@ -8,7 +8,7 @@ import webbrowser
 from config import settings
 from logger import setup_logging
 from agent import Agent
-from review import review
+from review import review, review_stale_facts
 from tools import LOAD_ERRORS, NEEDS_APPROVAL, TOOL_FUNCTIONS
 from tools.interaction import reset_tasks, task_list
 from tools.workspace import find_chart
@@ -25,12 +25,30 @@ from audit import recent_calls
 log = logging.getLogger("jinni.cli")
 
 
-def show_memories(agent: Agent) -> None:
+def show_memories(agent: Agent, query: str = "") -> None:
+    parts = query.strip().split(maxsplit=1)
+    kind = ""
+    if parts and parts[0].lower() in {"fact", "facts", "event", "events"}:
+        kind = "fact" if parts[0].lower().startswith("fact") else "event"
+        query = parts[1] if len(parts) > 1 else ""
+    elif parts and parts[0].lower() == "search":
+        query = parts[1] if len(parts) > 1 else ""
+
     items = agent.memory.list_all()
+    if kind:
+        items = [item for item in items if item.kind == kind]
+    if query:
+        matching_ids = {item.id for item in agent.memory.search(query, limit=200)}
+        items = [item for item in items if item.id in matching_ids]
     if not items:
-        print("  (no memories yet)")
-    for m in items:
-        print(f"  #{m.id} [{m.kind}] {m.created} {m.text}")
+        print("  (no matching memories)")
+        return
+    print(f"  {len(items)} matching memory item(s):")
+    for item in items[:100]:
+        session = item.session_id or "older memory"
+        print(f"  #{item.id} [{item.kind}] {item.created} · session {session}: {item.text}")
+    if len(items) > 100:
+        print(f"  ... {len(items) - 100} more")
 
 
 def forget_command(agent: Agent, arg: str) -> None:
@@ -53,8 +71,10 @@ def help_text() -> str:
   /parallel          toggle parallel tool calls
   /tools             list available tools
   /allowed, /revoke  inspect or clear session approvals
-  /memory, /forget   inspect or remove saved memories
+  /memory [FILTER]   browse memories by fact/event or search text
+  /forget            remove saved memories
   /tasks             show the session task list
+  /stats             show session token, timing, and tool totals
   /prune DAYS        review and remove old session notes
   /audit [COUNT]     show recent approved tool calls
   /open [NAME]       open a chart
@@ -78,7 +98,7 @@ def config_text(config=settings) -> str:
         f"thinking by default: {'on' if config.thinking_default else 'off'}",
         f"parallel tools: {'on' if config.parallel_tools else 'off'}",
         f"search: {config.search_backend} ({config.search_region})",
-        f"memory limits: {config.max_facts} facts, {config.max_fact_chars} chars each, {config.recall_results} recall results",
+        f"memory limits: {config.max_facts} facts, {config.max_fact_chars} chars each, {config.memory_prompt_chars} prompt chars, {config.recall_results} recall results",
         f"embeddings: {'on' if config.embed_enabled else 'off'}",
         f"MCP: {'on' if config.mcp_enabled else 'off'}; servers: {servers}",
         f"PNG default: {config.png_theme}, {config.png_width}x{config.png_height} at {config.png_scale:g}x",
@@ -96,6 +116,23 @@ def undo_last_turn(agent: Agent) -> str:
     del agent.messages[turn_start:]
     agent.apply_memory()
     return "(latest chat turn removed from conversation history)"
+
+
+def stats_text(agent: Agent) -> str:
+    stats = agent.stats
+    total_tokens = stats["prompt_tokens"] + stats["completion_tokens"]
+    average = stats["seconds"] / stats["laps"] if stats["laps"] else 0.0
+    lines = [
+        f"model laps: {stats['laps']}",
+        f"tokens: {total_tokens} total ({stats['prompt_tokens']} prompt, {stats['completion_tokens']} generated)",
+        f"model time: {stats['seconds']:.1f}s total, {average:.1f}s per lap average",
+        "tool calls:",
+    ]
+    if agent.tool_counts:
+        lines.extend(f"  {name}: {count}" for name, count in sorted(agent.tool_counts.items()))
+    else:
+        lines.append("  (none)")
+    return "\n".join(lines)
 
 def main() -> None:
     for stream in (sys.stdout, sys.stdin):
@@ -160,10 +197,13 @@ def main() -> None:
                     print("  (all session permissions revoked)")
                     continue
                 if cmd == "/memory":
-                    show_memories(agent)
+                    show_memories(agent, arg)
                     continue
                 if cmd == "/tasks":
                     print(task_list("list"))
+                    continue
+                if cmd == "/stats":
+                    print(stats_text(agent))
                     continue
                 if cmd == "/audit":
                     raw_count = arg.strip()
@@ -310,6 +350,13 @@ def main() -> None:
         except (Exception, KeyboardInterrupt) as e:
             log.exception("memory review failed")
             print(f"  (skipped the memory review: {type(e).__name__})")
+        try:
+            deleted = review_stale_facts(agent.memory)
+            if deleted:
+                print(f"  ({deleted} stale fact(s) forgotten)")
+        except (Exception, KeyboardInterrupt) as e:
+            log.exception("stale memory review failed")
+            print(f"  (skipped stale memory review: {type(e).__name__})")
         if manager:
             try:
                 runner.run(manager.stop())
