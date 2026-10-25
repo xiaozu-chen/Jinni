@@ -7,6 +7,7 @@ import zipfile
 import xml.etree.ElementTree as ET
 
 import svgcharts
+from chart_records import record_genuine_chart
 
 from .registry import tool
 from .provenance import read_csv_provenance
@@ -212,8 +213,13 @@ def make_chart(file: str, x_column: str, y_column: str, kind: str = "bar", title
         out = safe_path(f"{CHART_DIR}/{slug}.html")
         out.parent.mkdir(parents=True, exist_ok=True)
         out.write_text(page, encoding="utf-8")
+        try:
+            record_genuine_chart(out, page)
+            record_note = ""
+        except OSError:
+            record_note = " The integrity record could not be saved, so /open will use its structural check."
         note = " Note: this data was typed by Jinni itself this session, so tell the user its numbers are unverified." if typed_by_model else ""
-        return f"Saved the chart to {CHART_DIR}/{slug}.html ({len(labels)} rows). Tell the user to type /open to view it.{note}"
+        return f"Saved the chart to {CHART_DIR}/{slug}.html ({len(labels)} rows). Tell the user to type /open to view it.{note}{record_note}"
     except FileNotFoundError:
         return f"Error: '{file}' was not found in the workspace."
     except Exception as e:

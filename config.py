@@ -53,6 +53,7 @@ class Settings:
     memory_db: Path = Path("memory.db")
     max_facts: int = 20
     max_fact_chars: int = 200
+    memory_prompt_chars: int = 2400
     max_event_chars: int = 600
     recall_results: int = 5
 

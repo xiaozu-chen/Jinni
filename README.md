@@ -25,6 +25,18 @@ MCP tool calls are checked against each server's advertised input schema before 
 
 During the exit review, Jinni flags facts that look similar to saved facts so you can decide whether to keep both or skip the new one. Use `/prune DAYS` to review session notes older than that many days; Jinni shows a preview and asks before deleting. Saved facts are not pruned.
 
+## CLI shortcuts
+
+Use `/help` for the command list, `/config` to inspect non-sensitive effective settings, and `/undo` to remove the latest chat turn from conversation history. `/undo` does not reverse file or other tool side effects.
+
+During a chat, Jinni can ask a clarifying question and keep a session task list with `task_list` actions `list`, `add`, `done`, `remove`, and `clear`; `/tasks` displays it. At the configured step limit, it asks before continuing another block of tool calls.
+
+## Project inspection tools
+
+The read-only coding tools include ranged `read_file`, `search_files`, `find_files`, `code_outline`, and `project_tree`. Searches skip common generated folders, reject unsafe regex patterns, and cap their scan and output sizes.
+
+Use `check_python(path, checker)` for a bounded syntax check, Ruff lint, or Pyright type check. Ruff and Pyright are optional local tools; checks time out, cap their output, and never apply fixes.
+
 ## Read-only MCP server
 
 Run `python mcp_server.py` from the project directory as an MCP stdio server. It exposes only `list_files`, `read_file`, and `recall`; file access stays inside the workspace. It has no write, web, or delete tools.

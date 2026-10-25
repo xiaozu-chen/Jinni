@@ -1,6 +1,7 @@
 import asyncio
 import json
 import time
+from dataclasses import replace
 
 import httpx
 import openai
@@ -13,6 +14,8 @@ from agent import Agent, authorize, execute
 from models import ToolCall
 from tools import TOOL_FUNCTIONS
 import agent as agent_mod
+from audit import recent_calls
+from approval_preview import MAX_ARGUMENT_SUMMARY, summarize_arguments
 
 
 def make_call(name, args):
@@ -54,6 +57,57 @@ def test_approved_write_works(workspace, monkeypatch):
     asyncio.run(execute(call, args))
 
     assert (workspace / "a.txt").read_text(encoding="utf-8") == "x"
+
+
+def test_approved_write_shows_bounded_diff_and_redacts_audit(workspace, monkeypatch, capsys):
+    monkeypatch.setattr("builtins.input", lambda _: "y")
+    call = make_call("write_file", {"path": "note.txt", "content": "private notes"})
+
+    args, _ = authorize(call)
+    asyncio.run(execute(call, args))
+
+    prompt = capsys.readouterr().out
+    assert "+private notes" in prompt
+    audit = recent_calls()
+    assert "[approved] write_file" in audit
+    assert "[redacted]" in audit
+    assert "private notes" not in audit
+
+
+def test_overwrite_preview_warns_that_existing_file_will_be_replaced(workspace, monkeypatch, capsys):
+    (workspace / "note.txt").write_text("old", encoding="utf-8")
+    monkeypatch.setattr("builtins.input", lambda _: "n")
+
+    authorize(make_call("write_file", {"path": "note.txt", "content": "new"}))
+
+    assert "Existing file will be overwritten." in capsys.readouterr().out
+    assert (workspace / "note.txt").read_text(encoding="utf-8") == "old"
+
+
+def test_approval_arguments_are_truncated():
+    summary = summarize_arguments({"content": "x" * (MAX_ARGUMENT_SUMMARY * 2)})
+
+    assert len(summary) <= MAX_ARGUMENT_SUMMARY + len("…[truncated]")
+    assert summary.endswith("…[truncated]")
+
+
+def test_invalid_python_write_is_rejected_before_approval(workspace, monkeypatch):
+    monkeypatch.setattr("builtins.input", lambda _: pytest.fail("invalid Python must not prompt"))
+    args, message = authorize(make_call("write_file", {"path": "broken.py", "content": "def nope(:\n"}))
+
+    assert args is None
+    assert "syntax error on line 1" in message
+    assert not (workspace / "broken.py").exists()
+
+
+def test_remembered_approval_is_marked_auto(monkeypatch):
+    monkeypatch.setattr("builtins.input", lambda _: "a")
+    allowed = set()
+    authorize(make_call("fetch_url", {"url": "https://example.com/one"}), allowed)
+    monkeypatch.setattr("builtins.input", lambda _: pytest.fail("remembered approval should not prompt"))
+    authorize(make_call("fetch_url", {"url": "https://example.com/two"}), allowed)
+
+    assert "[auto] fetch_url" in recent_calls(2)
 
 
 def slow_calls(monkeypatch):
@@ -223,3 +277,45 @@ def test_async_tools_are_awaited(monkeypatch):
     call = make_call("greet", {"name": "Carl"})
     args, _ = authorize(call)
     assert asyncio.run(execute(call, args)) == "hi Carl"
+
+
+def test_step_limit_offers_to_continue(monkeypatch):
+    monkeypatch.setattr(agent_mod, "settings", replace(agent_mod.settings, max_steps=1))
+    answers = iter(["y"])
+    monkeypatch.setattr("builtins.input", lambda _: next(answers))
+    responses = iter([
+        ("", [make_call("get_current_time", {})], 10),
+        ("finished", [], 10),
+    ])
+    calls = []
+
+    async def fake_stream(self):
+        calls.append(True)
+        return next(responses)
+
+    monkeypatch.setattr(Agent, "stream_response", fake_stream)
+    agent = Agent()
+
+    asyncio.run(agent.chat("continue please"))
+
+    assert len(calls) == 2
+    assert agent.messages[-1] == {"role": "assistant", "content": "finished"}
+
+
+def test_step_limit_stops_when_user_says_no(monkeypatch, capsys):
+    monkeypatch.setattr(agent_mod, "settings", replace(agent_mod.settings, max_steps=1))
+    monkeypatch.setattr("builtins.input", lambda _: "n")
+    calls = []
+
+    async def fake_stream(self):
+        calls.append(True)
+        return "", [make_call("get_current_time", {})], 10
+
+    monkeypatch.setattr(Agent, "stream_response", fake_stream)
+    agent = Agent()
+
+    asyncio.run(agent.chat("one more thing"))
+
+    assert len(calls) == 1
+    assert "stopped at the step limit" in capsys.readouterr().out
+    assert agent.messages[-1]["role"] == "tool"

@@ -10,6 +10,7 @@ from logger import setup_logging
 from agent import Agent
 from review import review
 from tools import LOAD_ERRORS, NEEDS_APPROVAL, TOOL_FUNCTIONS
+from tools.interaction import reset_tasks, task_list
 from tools.workspace import find_chart
 from semantic import EmbedError, catch_up, hybrid_search
 from mcp_client import McpManager
@@ -18,9 +19,8 @@ from export_formats import export_pdf, export_svg
 from export_all import export_all
 from mcp_data import export_mcp_table
 from svgcharts import is_genuine_page
-
-sys.stdout.reconfigure(encoding="utf-8")
-sys.stdin.reconfigure(encoding="utf-8")
+from chart_records import check_chart_record, record_genuine_chart
+from audit import recent_calls
 
 log = logging.getLogger("jinni.cli")
 
@@ -43,8 +43,66 @@ def forget_command(agent: Agent, arg: str) -> None:
     else:
         print("  usage: /forget 12  or  /forget all")
 
+
+def help_text() -> str:
+    return """Commands:
+  /help              show this list
+  /config            show effective settings (sensitive values are hidden)
+  /undo              remove the latest chat turn from conversation history
+  /think             toggle model reasoning display
+  /parallel          toggle parallel tool calls
+  /tools             list available tools
+  /allowed, /revoke  inspect or clear session approvals
+  /memory, /forget   inspect or remove saved memories
+  /tasks             show the session task list
+  /prune DAYS        review and remove old session notes
+  /audit [COUNT]     show recent approved tool calls
+  /open [NAME]       open a chart
+  /png, /svg, /pdf   export a chart
+  /export-all [TYPE] export charts (png, svg, pdf, or all)
+  /mcp, /mcp-table   inspect MCP servers or export a table
+  /recall QUERY      search saved memories
+  /reindex           refresh semantic memory embeddings
+  exit               leave Jinni"""
+
+
+def config_text(config=settings) -> str:
+    servers = ", ".join(
+        f"{server.name} ({', '.join(server.tools) or 'no tools'})"
+        for server in config.mcp_servers
+    ) or "none"
+    return "\n".join((
+        f"model: {config.model}",
+        f"max steps: {config.max_steps}",
+        f"context limit: {config.context_limit} tokens",
+        f"thinking by default: {'on' if config.thinking_default else 'off'}",
+        f"parallel tools: {'on' if config.parallel_tools else 'off'}",
+        f"search: {config.search_backend} ({config.search_region})",
+        f"memory limits: {config.max_facts} facts, {config.max_fact_chars} chars each, {config.recall_results} recall results",
+        f"embeddings: {'on' if config.embed_enabled else 'off'}",
+        f"MCP: {'on' if config.mcp_enabled else 'off'}; servers: {servers}",
+        f"PNG default: {config.png_theme}, {config.png_width}x{config.png_height} at {config.png_scale:g}x",
+    ))
+
+
+def undo_last_turn(agent: Agent) -> str:
+    turn_start = next(
+        (index for index in range(len(agent.messages) - 1, 0, -1)
+         if agent.messages[index].get("role") == "user"),
+        None,
+    )
+    if turn_start is None:
+        return "(no chat turn to undo)"
+    del agent.messages[turn_start:]
+    agent.apply_memory()
+    return "(latest chat turn removed from conversation history)"
+
 def main() -> None:
+    for stream in (sys.stdout, sys.stdin):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8")
     setup_logging()
+    reset_tasks()
     log.info("started, model=%s", settings.model)
     for err in LOAD_ERRORS:
         log.warning("plugin skipped: %s", err)
@@ -70,6 +128,15 @@ def main() -> None:
                 if not user_text:
                     continue
                 cmd, _, arg = user_text.partition(" ")
+                if cmd == "/help":
+                    print(help_text())
+                    continue
+                if cmd == "/config":
+                    print(config_text())
+                    continue
+                if cmd == "/undo":
+                    print(undo_last_turn(agent))
+                    continue
                 if cmd == "/think":
                     agent.thinking_on = not agent.thinking_on
                     print(f"  (thinking: {'on' if agent.thinking_on else 'off'})")
@@ -94,6 +161,17 @@ def main() -> None:
                     continue
                 if cmd == "/memory":
                     show_memories(agent)
+                    continue
+                if cmd == "/tasks":
+                    print(task_list("list"))
+                    continue
+                if cmd == "/audit":
+                    raw_count = arg.strip()
+                    try:
+                        count = int(raw_count) if raw_count else 20
+                    except ValueError:
+                        count = 0
+                    print(recent_calls(count))
                     continue
                 if cmd == "/forget":
                     forget_command(agent, arg.strip())
@@ -127,7 +205,17 @@ def main() -> None:
                     if page is None:
                         print("  (no chart found. ask Jinni to make one first)")
                         continue
-                    if not is_genuine_page(page.read_text(encoding="utf-8", errors="replace")):
+                    page_text = page.read_text(encoding="utf-8", errors="replace")
+                    recorded = check_chart_record(page, page_text)
+                    genuine = recorded
+                    if recorded is None:
+                        genuine = is_genuine_page(page_text)
+                        if genuine:
+                            try:
+                                record_genuine_chart(page, page_text)
+                            except OSError:
+                                pass
+                    if not genuine:
                         warning = "  this page was not made by the current chart tool, so it may contain scripts. open anyway? (y/n) > "
                         if input(warning).strip().lower() != "y":
                             print("  (not opened)")

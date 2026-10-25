@@ -15,6 +15,9 @@ from tools import TOOL_FUNCTIONS, REMEMBERABLE, SCOPES, TOOL_SCHEMAS, NEEDS_APPR
 import memory
 from memory import MemoryStore, Proposal, extraction_prompt, parse_proposals
 import inspect
+from approval_preview import change_preview, validate_python_change
+from audit import record_call
+from approval_preview import summarize_arguments
 
 log = logging.getLogger("jinni.agent")
 RETRYABLE = (openai.APIConnectionError, openai.InternalServerError)
@@ -30,8 +33,8 @@ def authorize(call: ToolCall, allowed: set[str, str] | None = None) -> tuple[dic
     if not isinstance(args, dict):
         return None, "Error: the arguments must be a JSON object."
 
-    print(f"  [tool] {call.name}({args})")
-    log.info("tool calls: %s %s", call.name, call.arguments[:200])
+    print(f"  [tool] {call.name}({summarize_arguments(args)})")
+    log.info("tool calls: %s %s", call.name, summarize_arguments(args))
 
     if call.name not in TOOL_FUNCTIONS:
         return None, f"Error: unknown tool '{call.name}'"
@@ -39,7 +42,15 @@ def authorize(call: ToolCall, allowed: set[str, str] | None = None) -> tuple[dic
     if call.name in NEEDS_APPROVAL:
         scope = SCOPES[call.name](args) if call.name in SCOPES else "*"
         key = (call.name, scope)
-        if key not in allowed:
+        auto_approved = key in allowed
+        if call.name in ("write_file", "edit_file"):
+            syntax_error = validate_python_change(call.name, args)
+            if syntax_error:
+                return None, syntax_error
+            preview = change_preview(call.name, args)
+            if preview:
+                print("  proposed change:\n" + preview)
+        if not auto_approved:
             can_remember = call.name in REMEMBERABLE and scope != ""
             if can_remember:
                 what = "this session" if scope == "*" else f"{scope} this session"
@@ -53,6 +64,11 @@ def authorize(call: ToolCall, allowed: set[str, str] | None = None) -> tuple[dic
             elif answer != "y":
                 log.info("user declined %s", call.name)
                 return None, DECLINED
+        try:
+            record_call(call.name, args, "auto" if auto_approved else "approved")
+        except OSError as error:
+            log.exception("could not record approved tool call")
+            return None, f"Error: the call was not run because the audit log could not be written ({error})."
     return args, ""
 
 async def execute(call: ToolCall, args: dict[str, Any]) -> str:
@@ -107,11 +123,12 @@ class Agent:
         plans = [authorize(c, self.allowed) for c in calls]
         runnable = sum(1 for args, _ in plans if args is not None)
         start = time.perf_counter()
+        run_parallel = self.parallel_tools and not any(call.name == "ask_user" for call in calls)
 
         async def one(call: ToolCall, args: dict[str, Any] | None, refusal: str) -> str:
             return refusal if args is None else await execute(call, args)
 
-        if self.parallel_tools:
+        if run_parallel:
             results = list(await asyncio.gather(
                 *(one(c, a, r) for c, (a, r) in zip(calls, plans))
             ))
@@ -124,8 +141,7 @@ class Agent:
             if runnable == 1:
                 how = ""
             else:
-                how = " in parallel" if self.parallel_tools else " one, by one"
-            mode = "in parallel" if self.parallel_tools else "one by one"
+                how = " in parallel" if run_parallel else " one, by one"
             print(f"  ({runnable} tool call(s){how}: {time.perf_counter() - start:.1f}s)")
         return results
 
@@ -269,7 +285,21 @@ class Agent:
         log.info("user: %s", user_text[:200])
         self.messages.append({"role": "user", "content": user_text})
 
-        for step in range(settings.max_steps):
+        step = 0
+        step_limit = max(1, settings.max_steps)
+        while True:
+            if step >= step_limit:
+                try:
+                    answer = input("(hit the step limit. keep going? y/n) > ").strip().lower()
+                except (EOFError, KeyboardInterrupt):
+                    answer = "n"
+                if answer == "y":
+                    step_limit += max(1, settings.max_steps)
+                    print("  (continuing for another step block)")
+                    continue
+                log.info("hit step limit (%d), user chose stop", step_limit)
+                print("(stopped at the step limit)")
+                break
             self.apply_memory()
             try:
                 content, calls, used = await self.stream_response()
@@ -319,6 +349,4 @@ class Agent:
                     "tool_call_id": c.id,
                     "content": result,
                 })
-
-        log.warning("hit step limit (%d)", settings.max_steps)
-        print("(hit the step limit, stopping)")
+            step += 1

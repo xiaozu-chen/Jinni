@@ -2,6 +2,7 @@ import os
 import zipfile
 
 import tools
+from chart_records import check_chart_record
 from tools.charts import make_chart
 from tools.workspace import find_chart
 from tools.files import write_file
@@ -20,6 +21,9 @@ def test_creates_a_bar_chart_page(workspace):
     assert result.startswith("Saved")
     page = (workspace / "charts" / "sales-sales-bar.html").read_text(encoding="utf-8")
     assert "<svg" in page and "Sales" in page
+    chart_path = workspace / "charts" / "sales-sales-bar.html"
+    assert check_chart_record(chart_path, page) is True
+    assert check_chart_record(chart_path, page + " ") is False
 
 
 def test_creates_a_line_chart_page(workspace):

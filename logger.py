@@ -2,6 +2,7 @@ import logging
 from logging.handlers import RotatingFileHandler
 
 from config import settings
+from log_safety import SecretScrubber
 
 def setup_logging() -> None:
     logger = logging.getLogger("jinni")
@@ -14,5 +15,6 @@ def setup_logging() -> None:
     handler.setFormatter(
         logging.Formatter("%(asctime)s %(levelname)-7s %(name)s: %(message)s")
     )
+    handler.addFilter(SecretScrubber())
     logger.addHandler(handler)
     logger.propagate = False
