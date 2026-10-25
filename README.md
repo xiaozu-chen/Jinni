@@ -15,6 +15,10 @@ Install Jinni as a command with `python -m pip install -e .`. Copy `settings.exa
 
 Run `python -m pytest`, `ruff check .`, and `pyright` before opening a pull request. CI runs the same checks on pushes and pull requests.
 
+## Model evaluation
+
+Run `python -m eval_harness` against the configured local chat server to measure expected tool selection. The default matrix compares thinking on/off and menus of 8/all tools. Use `--models qwen3,qwen3.5`, `--menu-sizes 5,10,all`, or `--prompts prompt_variants.json` to compare named system prompts from a JSON object. `--server-context 16384` adds a context-size label; restart the local server with the matching context before each run. Cases and expected calls live in `eval_cases.json`; tools absent from a smaller menu are skipped so the score measures selection among available tools.
+
 ## Charts and data
 
 `make_chart` reads CSV files and `.xlsx` workbooks from the workspace. Excel input uses the first worksheet; legacy `.xls` files are not supported. Tables can contain up to 50 data rows.
@@ -43,6 +47,8 @@ Jinni only fetches URLs that the user supplied or that appeared in a web-search 
 During the exit review, Jinni flags facts that look similar to saved facts so you can decide whether to keep both or skip the new one. It also offers old facts for deletion; keeping one snoozes that prompt for another year. Use `/prune DAYS` to review session notes older than that many days; Jinni shows a preview and asks before deleting. Saved facts are not pruned automatically.
 
 Use `/memory facts`, `/memory events`, or `/memory search TEXT` to filter saved memories. Each item shows its source session; memory facts added to the system prompt are capped at 2,400 characters.
+
+Run `python bench_embed.py` with the configured embedding service running to compare related and unrelated similarity scores; it suggests a floor only when the sample ranges do not overlap.
 
 ## CLI shortcuts
 

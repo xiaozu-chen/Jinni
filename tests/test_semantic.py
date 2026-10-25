@@ -8,6 +8,7 @@ import numpy as np
 import pytest
 
 import semantic
+from bench_embed import threshold_summary
 from config import settings
 from semantic import EmbedError, catch_up, fuse, hybrid_search, semantic_search
 from tools.memory_tools import recall
@@ -253,3 +254,8 @@ def test_blank_query_returns_nothing(memory_store, fake_server):
 def test_recall_tool_uses_meaning(memory_store, fake_server):
     memory_store.add("fact", "The user owns a puppy.")
     assert "puppy" in recall("canine")
+
+
+def test_embedding_benchmark_suggests_only_a_separated_threshold():
+    assert "Suggested floor: 0.650" in threshold_summary([0.7, 0.8], [0.3, 0.6])
+    assert "ranges overlap" in threshold_summary([0.6, 0.8], [0.3, 0.7])

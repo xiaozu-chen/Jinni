@@ -32,6 +32,7 @@ py-modules = [
   "export_all",
   "export_formats",
   "export_png",
+  "eval_harness",
   "jinni",
   "logger",
   "log_safety",
