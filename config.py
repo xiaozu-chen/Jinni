@@ -74,6 +74,15 @@ class Settings:
     mcp_stop_timeout: float = 5.0
     mcp_result_chars: int = 3000
 
+    # PNG export (uses an installed Edge or Chrome, headless)
+    browser_path: str = ""
+    png_theme: str = "light"
+    png_width: int = 1280
+    png_height: int = 720
+    png_scale: float = 2.0
+    png_timeout: float = 30.0
+    png_headless_flag: str = "--headless=new"
+
 
 settings = Settings()
 

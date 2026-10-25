@@ -11,6 +11,8 @@ from tools import LOAD_ERRORS, NEEDS_APPROVAL, TOOL_FUNCTIONS
 from tools.workspace import find_chart
 from semantic import EmbedError, catch_up, hybrid_search
 from mcp_client import McpManager
+from export_png import ExportError, export_chart
+from svgcharts import is_genuine_page
 
 sys.stdout.reconfigure(encoding="utf-8")
 sys.stdin.reconfigure(encoding="utf-8")
@@ -94,12 +96,29 @@ def main() -> None:
                 if cmd == "/open":
                     page = find_chart(arg.strip())
                     if page is None:
-                        print("  (no chart found. ask Jinni to one first)")
-                    elif webbrowser.open(page.as_uri()):
+                        print("  (no chart found. ask Jinni to make one first)")
+                        continue
+                    if not is_genuine_page(page.read_text(encoding="utf-8", errors="replace")):
+                        warning = "  this page was not made by the current chart tool, so it may contain scripts. open anyway? (y/n) > "
+                        if input(warning).strip().lower() != "y":
+                            print("  (not opened)")
+                            continue
+                    if webbrowser.open(page.as_uri()):
                         print(f"  (opened {page.name})")
                     else:
                         print(f"  (could not open a browser. the file is at {page})")
                     continue
+                if cmd == "/png":
+                    page = find_chart(arg.strip())
+                    if page is None:
+                        print("  (no chart found. ask Jinni to make one first)")
+                        continue
+                    try:
+                        print(f"  ({export_chart(page)})")
+                    except ExportError as e:
+                        print(f"  (PNG export failed: {e})")
+                    continue
+
                 if cmd == "/recall":
                     found, mode = hybrid_search(agent.memory, arg.strip())
                     print(f"  ({len(found)} result(s), {mode} search)")
