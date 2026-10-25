@@ -12,6 +12,7 @@ from tools.workspace import find_chart
 from semantic import EmbedError, catch_up, hybrid_search
 from mcp_client import McpManager
 from export_png import ExportError, export_chart, parse_export_options
+from export_formats import export_pdf, export_svg
 from svgcharts import is_genuine_page
 
 sys.stdout.reconfigure(encoding="utf-8")
@@ -118,6 +119,17 @@ def main() -> None:
                         print(f"  ({export_chart(page, theme, width, height)})")
                     except (ExportError, ValueError) as e:
                         print(f"  (PNG export failed: {e})")
+                    continue
+                if cmd in ("/svg", "/pdf"):
+                    page = find_chart(arg.strip())
+                    if page is None:
+                        print("  (no chart found. ask Jinni to make one first)")
+                        continue
+                    try:
+                        result = export_svg(page) if cmd == "/svg" else export_pdf(page)
+                        print(f"  ({result})")
+                    except ExportError as e:
+                        print(f"  ({cmd[1:].upper()} export failed: {e})")
                     continue
 
                 if cmd == "/recall":

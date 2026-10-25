@@ -28,6 +28,21 @@ DARK_VARS = ("--bg:#111418; --fg:#e6e8eb; --muted:#9aa4b2; --grid:#2a2f37; "
              "--c0:#60a5fa; --c1:#fbbf24; --c2:#34d399; --c3:#f472b6; "
              "--c4:#a78bfa; --c5:#22d3ee; --c6:#facc15; --c7:#94a3b8;")
 
+SVG_EXPORT_CSS = """\
+:root { $vars }
+.s0 { --c: var(--c0); } .s1 { --c: var(--c1); } .s2 { --c: var(--c2); } .s3 { --c: var(--c3); }
+.s4 { --c: var(--c4); } .s5 { --c: var(--c5); } .s6 { --c: var(--c6); } .s7 { --c: var(--c7); }
+.grid { stroke: var(--grid); stroke-width: 1; }
+.axis { stroke: var(--muted); stroke-width: 1; }
+.tick, .xlabel, .axis-title { fill: var(--muted); font-size: 12px; }
+.value { fill: var(--fg); font-size: 11px; }
+.bar, .dot, .swatch, .slice { fill: var(--c); }
+.slice { stroke: var(--bg); stroke-width: 2; }
+.line { fill: none; stroke: var(--c); stroke-width: 2.5; stroke-linejoin: round; }
+.legend { fill: var(--fg); font-size: 12px; }
+.legend-value { fill: var(--muted); font-size: 12px; }
+"""
+
 EXPORT_CSS = """/* export layout */
   html, body { height: 100%; }
   body { padding: 20px 28px; box-sizing: border-box; overflow: hidden; }
@@ -352,3 +367,18 @@ def export_page(page: str, theme: str = "light") -> str:
     if not safe_svg(svg):
         raise ValueError("the chart contains elements the exporter does not allow")
     return html_page(title, subtitle, svg, theme=theme, export=True)
+
+
+def export_svg(page: str, theme: str = "light") -> str:
+    """Return a standalone, styled SVG from a genuine chart page."""
+    if theme not in ("light", "dark"):
+        raise ValueError("theme must be 'light' or 'dark'")
+    parts = parse_page(page)
+    if parts is None:
+        raise ValueError("this does not look like a Jinni chart page")
+    svg = parts[2]
+    if not safe_svg(svg):
+        raise ValueError("the chart contains elements the exporter does not allow")
+    css = SVG_EXPORT_CSS.replace("$vars", LIGHT_VARS if theme == "light" else DARK_VARS)
+    boundary = svg.find(">")
+    return svg[:boundary + 1] + f"\n<style>{css}</style>\n" + svg[boundary + 1:]
