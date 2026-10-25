@@ -1,6 +1,8 @@
 import math
+import re
+import xml.etree.ElementTree as ET
 from collections.abc import Mapping, Sequence
-from html import escape
+from html import escape, unescape
 from string import Template
 
 WIDTH, HEIGHT = 640, 360
@@ -8,6 +10,32 @@ LEFT, RIGHT, TOP, BOTTOM = 76, 24, 24, 72
 MAX_SERIES = 8
 PIE_R = 130
 PIE_CX, PIE_CY = 190, HEIGHT // 2
+
+SVG_NS = "{http://www.w3.org/2000/svg}"
+SVG_TAGS = {"svg", "title", "line", "text", "rect", "circle", "polyline", "path"}
+SVG_ATTRS = {"viewBox", "role", "aria-label", "class", "x", "y", "x1", "y1", "x2", "y2",
+             "width", "height", "rx", "cx", "cy", "r", "d", "points", "transform", "text-anchor"}
+MAX_SVG_CHARS = 500_000
+
+_H1 = re.compile(r"<h1>(.*?)</h1>", re.S)
+_SUB = re.compile(r'<p class="sub">(.*?)</p>', re.S)
+
+
+LIGHT_VARS = ("--bg:#ffffff; --fg:#1f2328; --muted:#6b7280; --grid:#e5e7eb; "
+              "--c0:#2563eb; --c1:#d97706; --c2:#059669; --c3:#db2777; "
+              "--c4:#7c3aed; --c5:#0891b2; --c6:#a16207; --c7:#64748b;")
+DARK_VARS = ("--bg:#111418; --fg:#e6e8eb; --muted:#9aa4b2; --grid:#2a2f37; "
+             "--c0:#60a5fa; --c1:#fbbf24; --c2:#34d399; --c3:#f472b6; "
+             "--c4:#a78bfa; --c5:#22d3ee; --c6:#facc15; --c7:#94a3b8;")
+
+EXPORT_CSS = """/* export layout */
+  html, body { height: 100%; }
+  body { padding: 20px 28px; box-sizing: border-box; overflow: hidden; }
+  main { max-width: none; height: 100%; display: flex; flex-direction: column; }
+  svg { flex: 1; min-height: 0; width: 100%; height: auto; }
+  h1 { font-size: 1.6rem; }
+  p.sub { font-size: 1rem; }
+"""
 
 PAGE = """<!doctype html>
 <html lang="en">
@@ -17,11 +45,9 @@ PAGE = """<!doctype html>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>$title</title>
 <style>
-  :root { --bg:#ffffff; --fg:#1f2328; --muted:#6b7280; --grid:#e5e7eb; color-scheme: light dark;
-    --c0:#2563eb; --c1:#d97706; --c2:#059669; --c3:#db2777; --c4:#7c3aed; --c5:#0891b2; --c6:#a16207; --c7:#64748b; }
+  :root { $light_vars --c: var(--c0); color-scheme: light dark; }
   @media (prefers-color-scheme: dark) {
-    :root { --bg:#111418; --fg:#e6e8eb; --muted:#9aa4b2; --grid:#2a2f37;
-      --c0:#60a5fa; --c1:#fbbf24; --c2:#34d399; --c3:#f472b6; --c4:#a78bfa; --c5:#22d3ee; --c6:#facc15; --c7:#94a3b8; }
+    :root { $dark_vars }
   }
   body { margin:0; padding:24px; background:var(--bg); color:var(--fg); font-family: system-ui, "Segoe UI", sans-serif; }
   main { max-width: 760px; margin: 0 auto; }
@@ -39,7 +65,7 @@ PAGE = """<!doctype html>
   .line { fill: none; stroke: var(--c); stroke-width: 2.5; stroke-linejoin: round; }
   .legend { fill: var(--fg); font-size: 12px; }
   .legend-value { fill: var(--muted); font-size: 12px; }
-</style>
+$extra</style>
 </head>
 <body>
 <main>
@@ -50,6 +76,7 @@ $svg
 </body>
 </html>
 """
+
 
 
 def nice_ticks(low: float, high: float, target: int = 5) -> list[float]:
@@ -266,5 +293,62 @@ def pie_chart(labels: Sequence[str], values: Sequence[float], title: str) -> str
     return "\n".join(parts)
 
 
-def html_page(title: str, subtitle: str, svg: str) -> str:
-    return Template(PAGE).substitute(title=escape(title), subtitle=escape(subtitle), svg=svg)
+def _extra_css(theme: str | None, export: bool) -> str:
+    css = ""
+    if theme in ("light", "dark"):
+        css += f"  :root {{ color-scheme: {theme}; {LIGHT_VARS if theme == 'light' else DARK_VARS} }}\n"
+    if export:
+        css += EXPORT_CSS
+    return css
+
+
+def html_page(title: str, subtitle: str, svg: str, theme: str | None = None, export: bool = False) -> str:
+    return Template(PAGE).substitute(
+        title=escape(title), subtitle=escape(subtitle), svg=svg,
+        light_vars=LIGHT_VARS, dark_vars=DARK_VARS, extra=_extra_css(theme, export),
+    )
+
+
+def safe_svg(svg: str) -> bool:
+    """True only for markup built from the elements and attributes our charts use."""
+    if len(svg) > MAX_SVG_CHARS or "<!DOCTYPE" in svg or "<!ENTITY" in svg:
+        return False
+    try:
+        root = ET.fromstring(svg)
+    except ET.ParseError:
+        return False
+    for element in root.iter():
+        tag = element.tag
+        if not isinstance(tag, str) or not tag.startswith(SVG_NS) or tag[len(SVG_NS):] not in SVG_TAGS:
+            return False
+        if any(name not in SVG_ATTRS for name in element.attrib):
+            return False
+    return root.tag == SVG_NS + "svg"
+
+
+def parse_page(page: str) -> tuple[str, str, str] | None:
+    """(title, subtitle, svg) from one of our chart pages, or None if it doesn't look like one."""
+    h1, sub = _H1.search(page), _SUB.search(page)
+    start, end = page.find("<svg"), page.rfind("</svg>")
+    if not (h1 and sub) or start < 0 or end < start:
+        return None
+    return unescape(h1.group(1)), unescape(sub.group(1)), page[start : end + len("</svg>")]
+
+
+def is_genuine_page(page: str) -> bool:
+    """True if the page is exactly what our generator produces from its own parts."""
+    parts = parse_page(page)
+    return parts is not None and html_page(*parts) == page
+
+
+def export_page(page: str, theme: str = "light") -> str:
+    """A fresh, fixed-theme, fill-the-window page rebuilt from a chart's title, subtitle and svg."""
+    if theme not in ("light", "dark"):
+        raise ValueError("theme must be 'light' or 'dark'")
+    parts = parse_page(page)
+    if parts is None:
+        raise ValueError("this does not look like a Jinni chart page")
+    title, subtitle, svg = parts
+    if not safe_svg(svg):
+        raise ValueError("the chart contains elements the exporter does not allow")
+    return html_page(title, subtitle, svg, theme=theme, export=True)

@@ -177,3 +177,96 @@ def test_slices_over_half_use_the_large_arc_flag():
 def test_pie_rejects_bad_numbers(values):
     with pytest.raises(ValueError):
         svgcharts.pie_chart(["a", "b"][: len(values)], values, "T")
+
+
+def chart_page():
+    return svgcharts.html_page("Sales", "Source: s.csv", svgcharts.bar_chart(["a"], [1], "Sales", "x", "y"))
+
+
+def last_root_rule(page):
+    style = page.split("<style>")[1].split("</style>")[0]
+    return style.rsplit(":root {", 1)[1].split("}", 1)[0]
+
+
+SAMPLE_SVGS = {
+    "bar": lambda: svgcharts.bar_chart(["a", "b"], [1, 2], "T", "x", "y"),
+    "grouped": lambda: svgcharts.bar_chart(["a", "b"], {"p": [1, 2], "q": [3, 4]}, "T", "x", "y"),
+    "line": lambda: svgcharts.line_chart(["a", "b"], {"p": [1, 2], "q": [3, 4]}, "T", "x", "y"),
+    "pie": lambda: svgcharts.pie_chart(["a", "b", "c"], [3, 2, 1], "T"),
+}
+
+
+@pytest.mark.parametrize("kind", list(SAMPLE_SVGS))
+def test_every_chart_kind_passes_the_svg_safety_check(kind):
+    assert svgcharts.safe_svg(SAMPLE_SVGS[kind]())
+
+
+@pytest.mark.parametrize("svg", [
+    '<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>',
+    '<svg xmlns="http://www.w3.org/2000/svg" onload="alert(1)"></svg>',
+    '<svg xmlns="http://www.w3.org/2000/svg"><foreignObject/></svg>',
+    '<svg xmlns="http://www.w3.org/2000/svg"><image href="http://evil.example/x.png"/></svg>',
+    '<svg xmlns="http://www.w3.org/2000/svg"><rect style="fill:red"/></svg>',
+    '<svg xmlns="http://www.w3.org/2000/svg"><a href="javascript:alert(1)"><text/></a></svg>',
+    '<svg xmlns="http://www.w3.org/2000/svg"><rect/>',
+    '<!DOCTYPE svg [<!ENTITY x "y">]><svg xmlns="http://www.w3.org/2000/svg"/>',
+    '<div xmlns="http://www.w3.org/1999/xhtml"/>',
+    "not xml at all",
+])
+def test_unsafe_svg_is_rejected(svg):
+    assert not svgcharts.safe_svg(svg)
+
+
+def test_parse_page_round_trips_special_characters():
+    svg = svgcharts.bar_chart(["a"], [1], "T", "x", "y")
+    title, subtitle = "A <b> & 'q' \"d\" $5", "from <file> & more"
+    assert svgcharts.parse_page(svgcharts.html_page(title, subtitle, svg)) == (title, subtitle, svg)
+
+
+def test_parse_page_rejects_other_html():
+    assert svgcharts.parse_page("<html><body>hello</body></html>") is None
+
+
+def test_generated_pages_are_genuine_and_edited_ones_are_not():
+    page = chart_page()
+    assert svgcharts.is_genuine_page(page)
+    assert not svgcharts.is_genuine_page(page.replace("</main>", "<script>alert(1)</script></main>"))
+    assert not svgcharts.is_genuine_page("<html><body>hello</body></html>")
+
+
+def test_export_forces_the_requested_theme():
+    assert svgcharts.LIGHT_VARS in last_root_rule(svgcharts.export_page(chart_page(), "light"))
+    assert svgcharts.DARK_VARS in last_root_rule(svgcharts.export_page(chart_page(), "dark"))
+
+
+def test_export_adds_the_fill_the_window_layout():
+    assert "export layout" in svgcharts.export_page(chart_page(), "light")
+    assert "export layout" not in chart_page()
+
+
+def test_export_keeps_title_subtitle_and_chart():
+    exported = svgcharts.export_page(chart_page(), "light")
+    assert svgcharts.parse_page(exported) == svgcharts.parse_page(chart_page())
+
+
+def test_export_keeps_the_script_blocking_policy_first():
+    page = svgcharts.export_page(chart_page(), "dark")
+    assert "default-src 'none'" in page
+    assert page.index("Content-Security-Policy") < page.index("<style>") < page.index("<svg")
+
+
+def test_export_refuses_non_charts_and_tampered_charts():
+    with pytest.raises(ValueError):
+        svgcharts.export_page("<html><body>hi</body></html>")
+    evil = svgcharts.html_page("T", "S", '<svg xmlns="http://www.w3.org/2000/svg"><script>x()</script></svg>')
+    with pytest.raises(ValueError):
+        svgcharts.export_page(evil)
+
+
+def test_export_rejects_unknown_themes():
+    with pytest.raises(ValueError):
+        svgcharts.export_page(chart_page(), "sepia")
+
+
+def test_pages_define_a_default_series_color():
+    assert "--c: var(--c0)" in chart_page()
