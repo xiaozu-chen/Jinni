@@ -16,7 +16,9 @@ from config import settings
 from context import compact, to_transcript
 from models import Message, ToolCall
 from retry import with_retries
-from thinking_classifier import THINKING_CLASSIFIER_PROMPT, parse_thinking_label
+from thinking_classifier import (
+    THINKING_CLASSIFIER_PROMPT, THINKING_CLASSIFIER_SCHEMA, parse_thinking_label,
+)
 from tools import TOOL_FUNCTIONS, REMEMBERABLE, SCOPES, NEEDS_APPROVAL, tool_names, tool_schemas
 from tools.registry import TOOL_GROUPS
 from tools.web import is_trusted_url, trust_urls_from_text
@@ -213,7 +215,9 @@ class Agent:
                     {"role": "user", "content": user_text[:4000]},
                 ],
                 temperature=0,
-                max_tokens=4,
+                max_tokens=16,
+                response_format={"type": "json_object"},
+                extra_body={"json_schema": THINKING_CLASSIFIER_SCHEMA},
             )
             selected = parse_thinking_label(response.choices[0].message.content)
             if selected is None:

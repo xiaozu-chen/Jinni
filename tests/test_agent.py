@@ -49,6 +49,10 @@ def test_thinking_classifier_selects_a_strict_mode(monkeypatch):
     assert agent.thinking_on is True
     assert requests[0]["model"] == "tiny-router"
     assert requests[0]["temperature"] == 0
+    assert requests[0]["max_tokens"] == 16
+    assert requests[0]["response_format"] == {"type": "json_object"}
+    enum = requests[0]["extra_body"]["json_schema"]["properties"]["thinking"]["enum"]
+    assert enum == ["on", "off"]
     assert requests[0]["messages"][-1]["content"] == "Analyze this algorithm's complexity."
 
 

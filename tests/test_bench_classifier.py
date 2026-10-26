@@ -12,5 +12,9 @@ def test_classifier_benchmark_has_30_balanced_cases():
 def test_classifier_only_accepts_exact_on_off_labels():
     assert parse_thinking_label("on") is True
     assert parse_thinking_label(" OFF ") is False
+    assert parse_thinking_label('{"thinking":"on"}') is True
+    assert parse_thinking_label('{"thinking":"off"}') is False
     assert parse_thinking_label("probably on") is None
+    assert parse_thinking_label('{"thinking":"maybe"}') is None
+    assert parse_thinking_label('{"thinking":"on","extra":true}') is None
     assert parse_thinking_label(None) is None

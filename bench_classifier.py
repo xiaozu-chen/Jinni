@@ -9,7 +9,9 @@ import time
 from openai import AsyncOpenAI
 
 from config import settings
-from thinking_classifier import THINKING_CLASSIFIER_PROMPT, parse_thinking_label
+from thinking_classifier import (
+    THINKING_CLASSIFIER_PROMPT, THINKING_CLASSIFIER_SCHEMA, parse_thinking_label,
+)
 
 PROMPTS = (
     ("on", "Review this Python function for a race condition, explain the interleavings, and suggest a fix."),
@@ -61,7 +63,9 @@ async def evaluate(client: AsyncOpenAI, model: str) -> tuple[int, int, int]:
                     {"role": "user", "content": prompt},
                 ],
                 temperature=0,
-                max_tokens=4,
+                max_tokens=16,
+                response_format={"type": "json_object"},
+                extra_body={"json_schema": THINKING_CLASSIFIER_SCHEMA},
             )
             raw = response.choices[0].message.content
             selected = parse_thinking_label(raw)
