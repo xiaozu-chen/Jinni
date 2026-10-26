@@ -115,6 +115,13 @@ def test_results_are_labelled_as_data():
     assert "hello" in out and "not instructions" in out and "ddgs" in out
 
 
+def test_mcp_text_output_strips_terminal_escape_sequences():
+    out = format_result(result([text("\x1b[31munsafe\x1b[0m")]), "fixture")
+
+    assert "\x1b" not in out
+    assert "unsafe" in out
+
+
 def test_error_results_start_with_error():
     assert format_result(result([text("boom")], is_error=True), "s").startswith("Error: boom")
 
@@ -208,6 +215,16 @@ class FakeCallClient:
     async def list_tools(self):
         return SimpleNamespace(tools=[])
 
+    async def read_resource(self, uri):
+        self.calls.append(("read_resource", uri))
+        return SimpleNamespace(contents=[SimpleNamespace(text="resource text")])
+
+    async def get_prompt(self, name, arguments=None):
+        self.calls.append(("get_prompt", name, arguments))
+        return SimpleNamespace(messages=[SimpleNamespace(
+            role="user", content=SimpleNamespace(text="prompt text")
+        )])
+
 
 def ready_server():
     server = McpServer(McpServerConfig(name="fixture", command="fixture", tools=("lookup",)))
@@ -249,3 +266,38 @@ def test_server_call_refuses_tools_outside_allowlist():
 
     assert "not allowlisted" in message
     assert server.client.calls == []
+
+
+def test_resource_read_requires_explicit_allowlist_and_uses_safe_output():
+    from dataclasses import replace
+
+    server = ready_server()
+    uri = "file:///reports/sales"
+    server.cfg = replace(server.cfg, resources=(uri,))
+    server.resources = [SimpleNamespace(uri=uri)]
+
+    output = asyncio.run(server.read_resource(uri))
+    refused = asyncio.run(server.read_resource("file:///other"))
+
+    assert "resource text" in output and "not instructions" in output
+    assert "not allowlisted" in refused
+    assert server.client.calls == [("read_resource", uri)]
+
+
+def test_prompt_read_validates_arguments_and_formats_result():
+    from dataclasses import replace
+
+    server = ready_server()
+    server.cfg = replace(server.cfg, prompts=("summarize",))
+    server.prompts = [SimpleNamespace(name="summarize", arguments=[
+        SimpleNamespace(name="topic", required=True),
+    ])]
+
+    missing = asyncio.run(server.get_prompt("summarize", {}))
+    extra = asyncio.run(server.get_prompt("summarize", {"topic": "sales", "extra": "x"}))
+    output = asyncio.run(server.get_prompt("summarize", {"topic": "sales"}))
+
+    assert "required prompt argument" in missing
+    assert "unsupported prompt argument" in extra
+    assert "prompt text" in output and "not instructions" in output
+    assert server.client.calls == [("get_prompt", "summarize", {"topic": "sales"})]

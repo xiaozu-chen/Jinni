@@ -7,7 +7,7 @@ from config import McpServerConfig
 
 MAX_CONFIG_BYTES = 100_000
 NAME_PATTERN = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
-ALLOWED_FIELDS = {"name", "command", "args", "env", "tools", "remember", "call_timeout", "mode"}
+ALLOWED_FIELDS = {"name", "command", "args", "env", "tools", "remember", "resources", "prompts", "call_timeout", "mode"}
 
 
 def _string_list(value, field: str, server_index: int) -> tuple[str, ...]:
@@ -42,6 +42,8 @@ def load_mcp_servers(path: Path | str) -> tuple[McpServerConfig, ...]:
         args = _string_list(item.get("args", []), "args", index)
         tools = _string_list(item.get("tools", []), "tools", index)
         remember = _string_list(item.get("remember", []), "remember", index)
+        resources = _string_list(item.get("resources", []), "resources", index)
+        prompts = _string_list(item.get("prompts", []), "prompts", index)
         if not set(remember) <= set(tools):
             raise ValueError(f"server {index}: remembered tools must also be allowlisted")
         env = item.get("env", {})
@@ -63,6 +65,8 @@ def load_mcp_servers(path: Path | str) -> tuple[McpServerConfig, ...]:
             env=tuple(env.items()),
             tools=tools,
             remember=remember,
+            resources=resources,
+            prompts=prompts,
             call_timeout=float(timeout),
             mode=mode,
         ))

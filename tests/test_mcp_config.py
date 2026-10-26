@@ -15,6 +15,8 @@ def test_load_mcp_server_definitions_from_json(tmp_path):
         "env": {"FIXTURE_MODE": "sales"},
         "tools": ["get_table"],
         "remember": ["get_table"],
+        "resources": ["file:///reports/sales"],
+        "prompts": ["summarize"],
         "call_timeout": 12.5,
         "mode": "auto",
     }]}), encoding="utf-8")
@@ -23,6 +25,7 @@ def test_load_mcp_server_definitions_from_json(tmp_path):
         name="fixture", command="python", args=("fixture.py",),
         env=(("FIXTURE_MODE", "sales"),), tools=("get_table",),
         remember=("get_table",), call_timeout=12.5, mode="auto",
+        resources=("file:///reports/sales",), prompts=("summarize",),
     ),)
 
 

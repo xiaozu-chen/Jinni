@@ -13,6 +13,8 @@ class McpServerConfig:
     env: tuple[tuple[str, str], ...] = ()
     tools: tuple[str, ...] = ()         # allowlist: tools not listed here never reach the model
     remember: tuple[str, ...] = ()      # allowlisted tools the user may "always allow" per session
+    resources: tuple[str, ...] = ()     # explicit resource URI allowlist
+    prompts: tuple[str, ...] = ()       # explicit prompt-name allowlist
     call_timeout: float = 30.0
     mode: str = "auto"                  # "legacy" pins the old protocol if a server misbehaves
 
@@ -170,7 +172,7 @@ def _parse_mcp_server(value: dict[str, Any]) -> McpServerConfig:
     if unknown:
         raise ValueError(f"unknown MCP server fields: {', '.join(sorted(unknown))}")
     data = dict(value)
-    for name in ("args", "tools", "remember"):
+    for name in ("args", "tools", "remember", "resources", "prompts"):
         if name in data:
             items = data[name]
             if not isinstance(items, list) or any(not isinstance(item, str) for item in items):

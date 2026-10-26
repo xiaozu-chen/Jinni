@@ -92,7 +92,8 @@ def help_text() -> str:
   /open [NAME]       open a chart
   /png, /svg, /pdf   export a chart
   /export-all [TYPE] export charts (png, svg, pdf, or all)
-  /mcp, /mcp-table   inspect MCP servers or export a table
+  /mcp               inspect servers, resources, prompts, or restart one
+  /mcp-table         export an allowlisted MCP table
   /recall QUERY      search saved memories
   /reindex           refresh semantic memory embeddings
   exit               leave Jinni"""
@@ -468,6 +469,33 @@ def main(argv: list[str] | None = None) -> None:
                     elif restart_target is not None:
                         for line in runner.run(manager.restart(restart_target)):
                             print(line)
+                    elif arg == "resources" or arg.startswith("resources "):
+                        server_name = arg.partition(" ")[2].strip()
+                        for line in manager.resource_lines(server_name):
+                            print(line)
+                    elif arg == "prompts" or arg.startswith("prompts "):
+                        server_name = arg.partition(" ")[2].strip()
+                        for line in manager.prompt_lines(server_name):
+                            print(line)
+                    elif arg.startswith("read "):
+                        _, _, rest = arg.partition(" ")
+                        server_name, separator, uri = rest.partition(" ")
+                        if not separator or not uri.strip():
+                            print("  (usage: /mcp read SERVER URI)")
+                        else:
+                            print(f"  ({runner.run(manager.read_resource(server_name, uri.strip()))})")
+                    elif arg.startswith("prompt "):
+                        _, _, rest = arg.partition(" ")
+                        server_name, separator, rest = rest.partition(" ")
+                        prompt_name, separator_args, raw_args = rest.partition(" ")
+                        try:
+                            arguments = json.loads(raw_args) if separator_args else {}
+                            if not isinstance(arguments, dict):
+                                raise ValueError("arguments must be a JSON object")
+                            result = runner.run(manager.get_prompt(server_name, prompt_name, arguments))
+                            print(f"  ({result})")
+                        except (json.JSONDecodeError, ValueError) as error:
+                            print(f"  (MCP prompt failed: {error})")
                     else:
                         for line in manager.status_lines():
                             print(line)
