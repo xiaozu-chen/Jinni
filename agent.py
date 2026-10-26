@@ -40,6 +40,15 @@ CHECKPOINTED_WRITES = {
 }
 RETRYABLE = (openai.APIConnectionError, openai.InternalServerError)
 DECLINED = "The user declined this action. It was their choice, not a technical error. Do not retry; ask what they want instead."
+WORKSPACE_FILE_GUIDANCE = (
+    "Local files: For requests to inspect, compare, or chart local files, search the Jinni "
+    "workspace first with find_files or list_files, then read matching files with read_file. "
+    "For unnamed file requests, search by a relevant pattern such as '*.csv' before asking. "
+    "Use web_search for online research, never as a substitute for local file discovery. "
+    "This CLI cannot see files attached to a separate chat. If workspace search finds no "
+    "match, say that you checked the workspace and ask for a path or for the file to be "
+    "copied there. Never claim to have checked without actually searching."
+)
 
 def authorize(
     call: ToolCall,
@@ -144,7 +153,8 @@ class Agent:
             )
             if settings.thinking_classifier_model else None
         )
-        self.system_prompt = system_prompt if system_prompt is not None else settings.system_prompt
+        base_prompt = system_prompt if system_prompt is not None else settings.system_prompt
+        self.system_prompt = f"{base_prompt}\n\n{WORKSPACE_FILE_GUIDANCE}"
         self.messages: list[Message] = [{"role": "system", "content": self.system_prompt}]
         self.summary: str = ""
         self.project_guidance = project_guidance

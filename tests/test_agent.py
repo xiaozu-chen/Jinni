@@ -432,6 +432,16 @@ def test_system_prompt_contains_saved_facts(memory_store):
     assert "Carl" not in agent.messages[0]["content"]
 
 
+def test_custom_system_prompt_keeps_local_file_guidance():
+    agent = Agent(system_prompt="Keep responses concise.")
+    prompt = agent.messages[0]["content"]
+
+    assert prompt.startswith("Keep responses concise.")
+    assert "search the Jinni workspace first" in prompt
+    assert "This CLI cannot see files attached to a separate chat." in prompt
+    assert "Never claim to have checked without actually searching." in prompt
+
+
 def test_saved_facts_respect_prompt_character_budget(memory_store, monkeypatch):
     memory_store.add("fact", "old-" + "o" * 120)
     memory_store.add("fact", "new-" + "n" * 120)
