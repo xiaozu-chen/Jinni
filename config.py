@@ -89,6 +89,9 @@ class Settings:
     mcp_start_timeout: float = 20.0
     mcp_stop_timeout: float = 5.0
     mcp_result_chars: int = 3000
+    mcp_auto_restart: bool = True
+    mcp_restart_initial_delay: float = 1.0
+    mcp_restart_max_delay: float = 30.0
 
     # PNG export (uses an installed Edge or Chrome, headless)
     browser_path: str = ""
@@ -163,6 +166,13 @@ def load_settings(path: str | Path | None = None) -> Settings:
     for timeout in ("embed_server_start_timeout", "embed_server_stop_timeout"):
         if timeout in parsed and parsed[timeout] <= 0:
             raise ValueError(f"{timeout} must be positive")
+    for delay in ("mcp_restart_initial_delay", "mcp_restart_max_delay"):
+        if delay in parsed and parsed[delay] <= 0:
+            raise ValueError(f"{delay} must be positive")
+    initial = parsed.get("mcp_restart_initial_delay", defaults.mcp_restart_initial_delay)
+    maximum = parsed.get("mcp_restart_max_delay", defaults.mcp_restart_max_delay)
+    if maximum < initial:
+        raise ValueError("mcp_restart_max_delay must be at least the initial delay")
     return Settings(**parsed)
 
 

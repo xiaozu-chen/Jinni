@@ -24,7 +24,7 @@ def config(**overrides):
 
 def test_happy_path(clean_registry):
     async def scenario():
-        manager = McpManager((config(),))
+        manager = McpManager((config(),), auto_restart=False)
         await manager.start()
         try:
             assert manager.servers["t"].state == "up"
@@ -41,7 +41,7 @@ def test_happy_path(clean_registry):
 
 def test_crash_marks_the_server_down_and_restart_recovers(clean_registry):
     async def scenario():
-        manager = McpManager((config(),))
+        manager = McpManager((config(),), auto_restart=False)
         await manager.start()
         try:
             out = await registry.TOOL_FUNCTIONS["t_crash"]()
@@ -51,6 +51,24 @@ def test_crash_marks_the_server_down_and_restart_recovers(clean_registry):
 
             await manager.restart("t")
             assert manager.servers["t"].state == "up"
+            assert "hello" in await registry.TOOL_FUNCTIONS["t_echo"](text="hello")
+        finally:
+            await manager.stop()
+
+    asyncio.run(scenario())
+
+
+def test_crashed_server_restarts_automatically_with_backoff(clean_registry):
+    async def scenario():
+        manager = McpManager((config(),), restart_initial_delay=0.01, restart_max_delay=0.02)
+        await manager.start()
+        try:
+            assert (await registry.TOOL_FUNCTIONS["t_crash"]()).startswith("Error")
+            async def wait_until_ready():
+                while manager.servers["t"].state != "up" or "t_echo" not in registry.TOOL_FUNCTIONS:
+                    await asyncio.sleep(0.005)
+
+            await asyncio.wait_for(wait_until_ready(), timeout=3)
             assert "hello" in await registry.TOOL_FUNCTIONS["t_echo"](text="hello")
         finally:
             await manager.stop()

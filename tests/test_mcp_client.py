@@ -259,6 +259,23 @@ def test_raw_server_call_validates_arguments_and_forwards_valid_calls():
     assert server.client.calls == [("lookup", {"query": "cats"})]
 
 
+def test_manager_shutdown_cancels_pending_automatic_restarts(clean_registry):
+    from mcp_client import McpManager
+
+    async def scenario():
+        manager = McpManager((McpServerConfig(name="fixture", command="fixture"),),
+                             restart_initial_delay=10)
+        manager._schedule_restart("fixture")
+        assert manager._restart_tasks
+
+        await manager.stop()
+
+        assert manager._stopping
+        assert not manager._restart_tasks
+
+    asyncio.run(scenario())
+
+
 def test_server_call_refuses_tools_outside_allowlist():
     server = ready_server()
 

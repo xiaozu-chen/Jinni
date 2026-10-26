@@ -522,22 +522,76 @@ class McpServer:
 
 
 class McpManager:
-    def __init__(self, configs: tuple[McpServerConfig, ...]) -> None:
+    def __init__(self, configs: tuple[McpServerConfig, ...], *, auto_restart: bool | None = None,
+                 restart_initial_delay: float | None = None,
+                 restart_max_delay: float | None = None) -> None:
         self.servers = {c.name: McpServer(c, on_down=self._server_down) for c in configs}
         self.exposed: dict[str, list[str]] = {}
         self.hidden: dict[str, list[str]] = {}
+        self.auto_restart = settings.mcp_auto_restart if auto_restart is None else auto_restart
+        self.restart_initial_delay = restart_initial_delay or settings.mcp_restart_initial_delay
+        self.restart_max_delay = restart_max_delay or settings.mcp_restart_max_delay
+        self._stopping = False
+        self._restart_tasks: dict[str, asyncio.Task] = {}
+        self._restart_attempts: dict[str, int] = {}
 
     def _server_down(self, server: McpServer) -> None:
         self._unregister(server.cfg.name)
+        self._schedule_restart(server.cfg.name)
+
+    def _schedule_restart(self, name: str) -> None:
+        if not self.auto_restart or self._stopping:
+            return
+        task = self._restart_tasks.get(name)
+        if task is None or task.done():
+            self._restart_tasks[name] = asyncio.create_task(
+                self._retry_server(name), name=f"mcp-restart-{clean(name)}"
+            )
+
+    async def _cancel_restart(self, name: str) -> None:
+        task = self._restart_tasks.pop(name, None)
+        if task and task is not asyncio.current_task():
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+
+    async def _retry_server(self, name: str) -> None:
+        delay = self.restart_initial_delay
+        try:
+            while not self._stopping:
+                await asyncio.sleep(delay)
+                if self._stopping:
+                    return
+                server = self.servers.get(name)
+                if server is None or server.state == "up":
+                    return
+                self._restart_attempts[name] = self._restart_attempts.get(name, 0) + 1
+                self._unregister(name)
+                await server.stop()
+                lines = await self._bring_up(server, schedule_restart=False)
+                if server.state == "up":
+                    self._restart_attempts.pop(name, None)
+                    log.info("MCP server %s recovered after automatic restart", clean(name))
+                    return
+                log.warning("MCP server %s restart attempt %d failed", clean(name), self._restart_attempts[name])
+                delay = min(delay * 2, self.restart_max_delay)
+                if lines:
+                    log.debug("MCP restart result: %s", " ".join(plain(line) for line in lines))
+        except asyncio.CancelledError:
+            raise
+        finally:
+            if self._restart_tasks.get(name) is asyncio.current_task():
+                self._restart_tasks.pop(name, None)
 
     def _unregister(self, name: str) -> None:
         for tool in self.exposed.pop(name, []):
             remove_tool(tool)
 
-    async def _bring_up(self, server: McpServer) -> list[str]:
+    async def _bring_up(self, server: McpServer, *, schedule_restart: bool = True) -> list[str]:
         label = clean(server.cfg.name)
         await server.start()
         if server.state != "up":
+            if schedule_restart:
+                self._schedule_restart(server.cfg.name)
             return [f"  (MCP '{label}' did not start: {plain(server.error)})"]
         reg = register_server_tools(server)
         self.exposed[server.cfg.name] = reg.exposed
@@ -547,10 +601,13 @@ class McpManager:
         ]
 
     async def start(self) -> list[str]:
+        self._stopping = False
         groups = await asyncio.gather(*(self._bring_up(s) for s in self.servers.values()))
         return [line for lines in groups for line in lines]
 
     async def stop(self) -> None:
+        self._stopping = True
+        await asyncio.gather(*(self._cancel_restart(name) for name in list(self._restart_tasks)))
         for name in list(self.servers):
             self._unregister(name)
         await asyncio.gather(*(s.stop() for s in self.servers.values()), return_exceptions=True)
@@ -562,6 +619,7 @@ class McpManager:
             if server is None:
                 lines.append(f"  (no MCP server called '{clean(n)}')")
                 continue
+            await self._cancel_restart(n)
             self._unregister(n)
             await server.stop()
             lines += await self._bring_up(server)
@@ -581,7 +639,9 @@ class McpManager:
                 lines.append(f"  {label}: up | exposed: {exposed} | hidden: {hidden} | resources: {resources} | prompts: {prompts}")
             else:
                 why = f" ({plain(server.error)})" if server.error else ""
-                lines.append(f"  {label}: {server.state}{why}")
+                attempt = self._restart_attempts.get(name, 0)
+                retry = f" | automatic restart attempt {attempt + 1} scheduled" if name in self._restart_tasks else ""
+                lines.append(f"  {label}: {server.state}{why}{retry}")
         return lines
 
     def resource_lines(self, name: str = "") -> list[str]:
