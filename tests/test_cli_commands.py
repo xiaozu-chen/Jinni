@@ -1,6 +1,7 @@
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
+from typing import cast
 
 import pytest
 
@@ -163,7 +164,7 @@ def test_undo_removes_latest_user_turn_and_refreshes_prompt():
         apply_memory=lambda: None,
     )
 
-    result = undo_last_turn(agent)
+    result = undo_last_turn(cast(Agent, agent))
 
     assert "removed" in result
     assert [message.get("content") for message in agent.messages] == ["initial", "first", "answer"]
@@ -172,7 +173,7 @@ def test_undo_removes_latest_user_turn_and_refreshes_prompt():
 def test_undo_without_a_chat_turn_is_safe():
     agent = SimpleNamespace(messages=[{"role": "system", "content": "initial"}], apply_memory=lambda: None)
 
-    assert undo_last_turn(agent) == "(no chat turn to undo)"
+    assert undo_last_turn(cast(Agent, agent)) == "(no chat turn to undo)"
     assert len(agent.messages) == 1
 
 
@@ -181,13 +182,13 @@ def test_memory_command_searches_and_filters_with_session_provenance(memory_stor
     memory_store.add("event", "Read a report about tea exports.")
     agent = SimpleNamespace(memory=memory_store)
 
-    show_memories(agent, "facts")
+    show_memories(cast(Agent, agent), "facts")
     facts = capsys.readouterr().out
     assert "Likes jasmine tea." in facts
     assert "Read a report" not in facts
     assert memory_store.session_id in facts
 
-    show_memories(agent, "search exports")
+    show_memories(cast(Agent, agent), "search exports")
     assert "Read a report about tea exports." in capsys.readouterr().out
 
 

@@ -95,10 +95,12 @@ async def _case(symbol: str, expected_file: str, delegated: bool) -> Score:
             else:
                 content = ""
             elapsed = time.perf_counter() - started
-            metrics = LAST_RUN_METRICS if delegated else {}
-            child_tokens = metrics.total_tokens if delegated else 0
-            verified = metrics.verified if delegated else 0
-            dropped = metrics.dropped if delegated else 0
+            if delegated:
+                child_tokens = LAST_RUN_METRICS.total_tokens
+                verified = LAST_RUN_METRICS.verified
+                dropped = LAST_RUN_METRICS.dropped
+            else:
+                child_tokens = verified = dropped = 0
             try:
                 await agent.client.close()
             finally:

@@ -9,7 +9,7 @@ class FakeProcess:
     pid = 1234
     returncode = 0
 
-    def __init__(self, timeout=False):
+    def __init__(self, timeout: bool = False):
         self.timeout = timeout
         self.calls = 0
         self.killed = False

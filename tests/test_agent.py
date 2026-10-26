@@ -2,6 +2,7 @@ import asyncio
 import json
 import time
 from dataclasses import replace
+from typing import Any, cast
 
 import httpx
 import openai
@@ -185,7 +186,7 @@ def test_tools_run_one_by_one_when_parallel_is_off(monkeypatch):
 
 def test_failed_request_does_not_corrupt_history(monkeypatch):
     async def boom(self):
-        raise openai.APIConnectionError(request=httpx.Request("POST", "http://x"))
+        raise openai.APIConnectionError(request=cast(Any, httpx.Request("POST", "http://x")))
 
     monkeypatch.setattr(Agent, "stream_response", boom)
     agent = Agent()
@@ -219,7 +220,7 @@ def test_failure_after_tool_lap_rolls_back_whole_turn(monkeypatch):
         try:
             return next(laps)
         except StopIteration:
-            raise openai.APIConnectionError(request=httpx.Request("POST", "http://x"))
+            raise openai.APIConnectionError(request=cast(Any, httpx.Request("POST", "http://x")))
 
     monkeypatch.setattr(Agent, "stream_response", flaky)
     agent = Agent()
