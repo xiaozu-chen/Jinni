@@ -4,8 +4,10 @@ import argparse
 import json
 import sys
 import logging
+import re
 from datetime import date, timedelta
 
+import httpx
 import webbrowser
 from config import settings
 from mcp_config import resolve_mcp_servers
@@ -25,6 +27,7 @@ from svgcharts import is_genuine_page
 from chart_records import check_chart_record, record_genuine_chart
 from audit import recent_calls
 from transcripts import load_transcript, save_transcript
+from session_replay import SessionRecorder, render_replay, replay_path, replay_session
 from embedding_server import EmbeddingServer
 from approval_store import load_approvals, save_approvals
 import project as project_tools
@@ -85,6 +88,9 @@ def help_text() -> str:
   /forget            remove saved memories
   /tasks             show the saved task list
   /stats             show session token, timing, and tool totals
+  /replay start NAME record model requests locally; prompts and context are included
+  /replay stop       stop recording
+  /replay run NAME [MODEL] compare tool choices without running tools
   /save [NAME]       save a bounded conversation transcript
   /load NAME         load a transcript as context
   /prune DAYS        review and remove old session notes
@@ -330,6 +336,46 @@ def main(argv: list[str] | None = None) -> None:
                 if cmd == "/stats":
                     print(stats_text(agent))
                     continue
+                if cmd == "/replay":
+                    replay_parts = arg.split()
+                    if len(replay_parts) == 2 and replay_parts[0] == "start":
+                        name = replay_parts[1]
+                        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}", name):
+                            print("  (use a replay name with letters, numbers, _ or -)")
+                            continue
+                        if agent.replay_recorder:
+                            agent.replay_recorder.close()
+                        try:
+                            replay_file = replay_path(workspace_tools.WORKSPACE, name)
+                            agent.replay_recorder = SessionRecorder(replay_file)
+                        except (OSError, ValueError) as error:
+                            agent.replay_recorder = None
+                            print(f"  (could not start replay recording: {type(error).__name__})")
+                        else:
+                            print(f"  (recording model requests and tool choices in {replay_file})")
+                    elif replay_parts == ["stop"]:
+                        if agent.replay_recorder:
+                            agent.replay_recorder.close()
+                            agent.replay_recorder = None
+                            print("  (replay recording stopped)")
+                        else:
+                            print("  (replay recording is not active)")
+                    elif replay_parts and replay_parts[0] == "run" and len(replay_parts) in {2, 3}:
+                        name = replay_parts[1]
+                        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}", name):
+                            print("  (use a replay name with letters, numbers, _ or -)")
+                            continue
+                        try:
+                            replay_file = replay_path(workspace_tools.WORKSPACE, name)
+                            results = runner.run(replay_session(
+                                replay_file, model=replay_parts[2] if len(replay_parts) == 3 else None
+                            ))
+                            print(render_replay(results))
+                        except (OSError, ValueError, httpx.HTTPError, KeyError, IndexError) as error:
+                            print(f"  (replay failed: {type(error).__name__}: {error})")
+                    else:
+                        print("  (usage: /replay start NAME | /replay stop | /replay run NAME [MODEL])")
+                    continue
                 if cmd == "/save":
                     name = arg.strip()
                     result = save_transcript(agent, name)
@@ -508,6 +554,9 @@ def main(argv: list[str] | None = None) -> None:
         except (KeyboardInterrupt, EOFError):
             print()
 
+        if agent.replay_recorder:
+            agent.replay_recorder.close()
+            agent.replay_recorder = None
         print("  (looking back over this session...)")
         try:
             proposals = runner.run(agent.propose_memories())

@@ -40,6 +40,8 @@ To bridge data from MCP, configure an allowlisted server tool that returns JSON 
 
 MCP tool calls are checked against each server's advertised input schema before they are sent. Tools also must be explicitly allowlisted in `mcp_servers.json` or the built-in settings.
 
+Use `/replay start NAME` to record model requests and expected tool choices locally, `/replay stop` to finish, and `/replay run NAME [MODEL]` to compare choices against a model. Replays store conversation context under `workspace/.jinni/replays/`; only start recording when that local data is appropriate to save. Replay never runs the model's selected tools.
+
 Jinni only fetches URLs that the user supplied or that appeared in a web-search result during the session. The existing per-domain approval still applies.
 
 ## Memory maintenance

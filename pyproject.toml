@@ -49,6 +49,7 @@ py-modules = [
   "retry",
   "review",
   "semantic",
+  "session_replay",
   "svgcharts",
   "task_store",
   "transcripts",

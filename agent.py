@@ -113,6 +113,7 @@ class Agent:
         self.parallel_tools: bool = settings.parallel_tools
         self.allowed: set[tuple[str, str]] = set()
         self.write_checkpoint: str | None = None
+        self.replay_recorder = None
         self.allowed_file = allowed_file
         self.project_active = project_active
         self.stats = {
@@ -228,11 +229,13 @@ class Agent:
         start = time.perf_counter()
         first: float | None = None
         generated = 0
+        request_messages = json.loads(json.dumps(self.messages, ensure_ascii=False))
+        request_tools = json.loads(json.dumps(tool_schemas(self.project_active), ensure_ascii=False))
 
         stream = await self.request(
             model=settings.model,
-            messages=self.messages,
-            tools=tool_schemas(self.project_active),
+            messages=request_messages,
+            tools=request_tools,
             stream=True,
             stream_options={"include_usage": True},
             extra_body={"chat_template_kwargs": {"enable_thinking": self.thinking_on}},
@@ -301,6 +304,11 @@ class Agent:
         tool_calls = [
             ToolCall(id=c["id"] or f"call_{i}", name=c["name"], arguments=c["arguments"]) for i, c, in sorted(calls.items())
         ]
+        if self.replay_recorder:
+            try:
+                self.replay_recorder.record(request_messages, request_tools, [call.name for call in tool_calls])
+            except OSError as error:
+                log.warning("could not record replay case: %s", type(error).__name__)
         return content, tool_calls, used
 
     async def summarize_history(self, keep: int = settings.keep_turns) -> bool:
