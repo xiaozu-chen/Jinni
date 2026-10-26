@@ -1,9 +1,15 @@
 """Register user-facing clarification and task-list tools backed by persistent local state."""
 
+from contextvars import ContextVar
+from collections.abc import Callable
+
 from .registry import tool
 import task_store
 from task_store import TaskStore
 
+USER_INPUT_PROVIDER: ContextVar[Callable[[str, str, str], str] | None] = ContextVar(
+    "jinni_user_input_provider", default=None,
+)
 
 
 @tool(
@@ -18,11 +24,15 @@ def ask_user(question: str, choices: str = "") -> str:
         return "Error: the question must contain 1 to 500 characters."
     if len(choices) > 200:
         return "Error: suggested choices are limited to 200 characters."
-    prompt = f"  Jinni asks: {question.strip()}"
-    if choices.strip():
-        prompt += f" ({choices.strip()})"
     try:
-        answer = input(prompt + "\n  > ").strip()
+        provider = USER_INPUT_PROVIDER.get()
+        if provider is not None:
+            answer = provider("question", question.strip(), choices.strip()).strip()
+        else:
+            prompt = f"  Jinni asks: {question.strip()}"
+            if choices.strip():
+                prompt += f" ({choices.strip()})"
+            answer = input(prompt + "\n  > ").strip()
     except (EOFError, KeyboardInterrupt):
         return "The user did not provide an answer."
     return answer or "The user left the answer blank."

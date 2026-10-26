@@ -81,3 +81,5 @@ Launch `jinni --project PATH` to copy a repository into `workspace/projects/` be
 ## Read-only MCP server
 
 Run `python mcp_server.py` from the project directory as an MCP stdio server. It exposes only `list_files`, `read_file`, and `recall`; file access stays inside the workspace. It has no write, web, or delete tools.
+
+For the Tauri desktop UI, run `python desktop_api.py` to start the loopback HTTP/SSE backend. See [DESKTOP_API.md](docs/DESKTOP_API.md) for the endpoint contract and event format.

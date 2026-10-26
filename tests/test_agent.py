@@ -229,7 +229,7 @@ def test_project_tools_are_hidden_and_refused_without_an_active_project(monkeypa
 
     result = asyncio.run(agent.run_tools([make_call("write_file", {"path": "a.txt", "content": "x"})]))
 
-    assert "only after selecting a managed project" in result[0]
+    assert "only after selecting a project" in result[0]
     assert "find_files" not in agent.visible_tool_names()
     assert "write_file" not in agent.visible_tool_names()
 

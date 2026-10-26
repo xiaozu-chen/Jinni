@@ -7,7 +7,7 @@ import json
 import time
 import logging
 from collections import Counter
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Callable
 
 import openai
 from openai import AsyncOpenAI
@@ -21,6 +21,7 @@ from thinking_classifier import (
 )
 from tools import TOOL_FUNCTIONS, REMEMBERABLE, SCOPES, NEEDS_APPROVAL, tool_names, tool_schemas
 from tools.registry import TOOL_GROUPS
+from tools.interaction import USER_INPUT_PROVIDER
 from tools.web import is_trusted_url, trust_urls_from_text
 import memory
 from memory import MemoryStore, Proposal, extraction_prompt, parse_proposals
@@ -58,6 +59,7 @@ def authorize(
     call: ToolCall,
     allowed: set[tuple[str, str]] | None = None,
     emit: EventSink | None = None,
+    input_func: Callable[[str], str] | None = None,
 ) -> tuple[dict[str, Any] | None, str]:
     # Treat model output as a proposal: validate it, apply policy, then ask the human if needed.
     allowed = set() if allowed is None else allowed
@@ -101,7 +103,8 @@ def authorize(
                 choices = f"y/n/a=always allow {what}"
             else:
                 choices = "y/n"
-            answer = input(f"  allow {call.name}? ({choices}) > ").strip().lower()
+            prompt = f"  allow {call.name}? ({choices}) > "
+            answer = (input_func or input)(prompt).strip().lower()
             if answer == "a" and can_remember:
                 allowed.add(key)
                 log.info("user allowed %s for %s this session", call.name, scope)
@@ -141,7 +144,8 @@ class Agent:
                  event_sink: EventSink | None = None, *, system_prompt: str | None = None,
                  tool_menu: set[str] | None = None, quiet: bool = False,
                  thinking_override: bool | None = None, no_memory: bool = False,
-                 redact_tool_results: bool = False) -> None:
+                 redact_tool_results: bool = False,
+                 interaction_provider: Callable[[str, str, str], str] | None = None) -> None:
         self.client = AsyncOpenAI(
             base_url=settings.base_url, 
             api_key="not-needed", 
@@ -176,6 +180,7 @@ class Agent:
         self.tool_menu = None if tool_menu is None else set(tool_menu)
         self.no_memory = no_memory
         self.redact_tool_results = redact_tool_results
+        self.interaction_provider = interaction_provider
         self.events: list[AgentEvent] = []
         self.stats = {
             "laps": 0,
@@ -197,6 +202,11 @@ class Agent:
             self.event_sink(event)
         else:
             self.events.append(event)
+
+    def _approval_input(self, prompt: str) -> str:
+        if self.interaction_provider:
+            return self.interaction_provider("approval", prompt.strip(), "")
+        return input(prompt)
 
     def set_project_active(self, active: bool) -> None:
         self.project_active = active
@@ -281,15 +291,19 @@ class Agent:
         self.tool_counts.update(call.name for call in calls)
         previous_approvals = self.allowed.copy()
         # Decide all approvals before starting the batch, so parallel calls can't outrun consent.
-        plans = [
+        plans = []
+        for call in calls:
             # The schema only suggests tools; this executor check is the actual fence, nya.
-            (None, "Error: that tool is not available to a subagent.")
-            if self.tool_menu is not None and call.name not in self.tool_menu
-            else (None, "Error: project tools are available only after selecting a managed project.")
-            if self.project_active is False and TOOL_GROUPS.get(call.name) == "project"
-            else authorize(call, self.allowed, self.emit)
-            for call in calls
-        ]
+            if self.tool_menu is not None and call.name not in self.tool_menu:
+                plans.append((None, "Error: that tool is not available to a subagent."))
+            elif self.project_active is False and TOOL_GROUPS.get(call.name) == "project":
+                plans.append((None, "Error: project tools are available only after selecting a project."))
+            elif self.interaction_provider:
+                plans.append(await asyncio.to_thread(
+                    authorize, call, self.allowed, self.emit, self._approval_input,
+                ))
+            else:
+                plans.append(authorize(call, self.allowed, self.emit))
         if self.allowed_file and self.allowed != previous_approvals:
             try:
                 save_approvals(self.allowed_file, self.allowed)
@@ -316,10 +330,14 @@ class Agent:
                         self.write_checkpoint = checkpoint
                 except (OSError, ValueError) as error:
                     return f"Error: {error}"
-            if self.redact_tool_results:
-                result = await execute(call, args, redact_result=True)
-            else:
-                result = await execute(call, args)
+            token = USER_INPUT_PROVIDER.set(self.interaction_provider)
+            try:
+                if self.redact_tool_results:
+                    result = await execute(call, args, redact_result=True)
+                else:
+                    result = await execute(call, args)
+            finally:
+                USER_INPUT_PROVIDER.reset(token)
             name = call.name.lower()
             if name in {"web_search", "search_snippets_for_chart"} or name.endswith("_search_text"):
                 trust_urls_from_text(result)

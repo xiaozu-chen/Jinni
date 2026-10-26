@@ -33,6 +33,7 @@ def memory_store(monkeypatch):
 @pytest.fixture
 def workspace(tmp_path, monkeypatch):
     monkeypatch.setattr(ws, "WORKSPACE", tmp_path.resolve())
+    monkeypatch.setattr(ws, "PROJECT_ACTIVE", False)
     monkeypatch.setattr(ws, "MODEL_WRITTEN", set())
     return tmp_path.resolve()
 

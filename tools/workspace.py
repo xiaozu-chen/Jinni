@@ -2,7 +2,9 @@
 
 from pathlib import Path
 
-WORKSPACE = Path("workspace").resolve()
+DEFAULT_WORKSPACE = Path("workspace").resolve()
+WORKSPACE = DEFAULT_WORKSPACE
+PROJECT_ACTIVE = False
 CHART_DIR = "charts"
 MODEL_WRITTEN: set[Path] = set()
 

@@ -101,8 +101,9 @@ def _managed_project() -> Path:
     if configured.is_symlink():
         raise ValueError("the active project folder cannot be a symbolic link")
     root = configured.resolve()
-    if not (root / ".jinni" / "managed-project").is_file() or not (root / ".git").is_dir():
-        raise ValueError("select a managed project before running project code")
+    managed = (root / ".jinni" / "managed-project").is_file() and (root / ".git").is_dir()
+    if (not workspace.PROJECT_ACTIVE and not managed) or not root.is_dir():
+        raise ValueError("select a project before running project code")
     return root
 
 

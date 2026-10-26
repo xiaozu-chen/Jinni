@@ -10,6 +10,7 @@ import sys
 import logging
 import re
 from datetime import date, timedelta
+from pathlib import Path
 
 import httpx
 import webbrowser
@@ -208,8 +209,10 @@ def mcp_restart_target(argument: str) -> str | None:
 
 def activate_project(path, agent: Agent) -> str:
     """Switch workspace-scoped tools and guidance together to one managed project."""
+    path = Path(path).expanduser().resolve()
     guidance = project_tools.load_project_guidance(path)
     workspace_tools.WORKSPACE = path
+    workspace_tools.PROJECT_ACTIVE = True
     export_all.WORKSPACE = path
     agent.project_guidance = guidance
     agent.apply_memory()
@@ -255,6 +258,7 @@ def main(argv: list[str] | None = None) -> None:
         print(f"  (plugin skipped: {err})")
 
     project_active = (active_workspace / ".jinni" / "managed-project").is_file()
+    workspace_tools.PROJECT_ACTIVE = project_active
     agent = Agent(project_guidance=project_guidance, allowed_file=settings.allowed_file,
                   project_active=project_active, event_sink=render_agent_event)
     agent.allowed.update(load_approvals(settings.allowed_file))
