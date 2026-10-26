@@ -21,8 +21,8 @@ def remember(fact: str) -> str:
 
 
 @tool(
-    description="Search your long-term memory of past sessions, by keywords or by meaning. Use it when the user refers to something from an earlier conversation that you cannot see in this one.",
-    params={"query": "A few keywords or a short phrase describing what to look for, like 'mm.txt', or 'the user's pet'."},
+    description="Search saved memories from earlier sessions, by keywords or meaning. Use only when the user refers to something they told you in a past conversation; never use it to locate current workspace files.",
+    params={"query": "A few keywords or a short phrase describing what to recall, such as the user's pet or a preference they mentioned earlier."},
 )
 def recall(query: str) -> str:
     found, _mode = semantic.hybrid_search(memory.get_store(), query)

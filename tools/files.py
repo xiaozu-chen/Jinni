@@ -87,7 +87,7 @@ def _valid_pattern(pattern: str) -> str | None:
 
 
 @tool(
-    description="List files and folders inside a directory in the workspace folder.",
+    description="List entries in a workspace folder. For recursive inventories use find_files with '**/*'; for a file type such as CSV use find_files with '*.csv'.",
     params={"path": "Directory path relative to the workspace. Use '.' for the workspace root."},
     group="project",
 )
@@ -103,7 +103,7 @@ def list_files(path: str = ".") -> str:
 
 
 @tool(
-    description="Read a text file in the workspace; ranged reads include line numbers and are capped.",
+    description="Read a named text or CSV file in the workspace. Use this to inspect or compare local files; call once for each named file. Ranged reads include line numbers and are capped.",
     params={
         "path": "Path to the file, relative to the workspace.",
         "start": "Optional first line number (1-based). Leave 0 for the original beginning-of-file read.",
@@ -207,7 +207,7 @@ def search_files(query: str, path: str = ".", regex: bool = False) -> str:
 
 
 @tool(
-    description="Find files and folders by glob pattern under a workspace directory. Search depth and result count are capped.",
+    description="Find workspace files by glob. Use '**/*' for a recursive inventory, '*.csv' for CSV discovery, or a named pattern such as '**/sales.csv' to locate a specific file. Prefer this over asking the user where files are; search depth and result count are capped.",
     params={
         "pattern": "Glob such as '*.py' or '**/*.md'.",
         "path": "Workspace directory to search, defaulting to the workspace root.",

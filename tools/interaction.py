@@ -7,7 +7,7 @@ from task_store import TaskStore
 
 
 @tool(
-    description="Ask the user one short clarifying question and return their answer.",
+    description="Ask one short clarifying question only when a missing detail prevents a safe or useful action. Do not ask instead of checking available workspace tools for files or information.",
     params={
         "question": "A concise question for the user.",
         "choices": "Optional comma-separated suggested answers.",

@@ -223,13 +223,26 @@ def test_tools_cannot_access_project_control_files(workspace):
             safe_path(path)
 
 
-def test_project_tools_are_hidden_and_refused_without_an_active_project(monkeypatch):
+def test_workspace_read_tools_work_but_writes_stay_hidden_without_a_project(workspace, monkeypatch):
+    (workspace / "sales.csv").write_text("month,revenue\nJan,120\n", encoding="utf-8")
     agent = Agent(project_active=False)
-    monkeypatch.setattr(agent_mod, "execute", lambda *args: pytest.fail("hidden tools cannot run"))
 
-    result = asyncio.run(agent.run_tools([make_call("write_file", {"path": "a.txt", "content": "x"})]))
+    async def fake_execute(call, args, **kwargs):
+        return TOOL_FUNCTIONS[call.name](**args)
 
-    assert "only after selecting a managed project" in result[0]
+    monkeypatch.setattr(agent_mod, "execute", fake_execute)
+
+    results = asyncio.run(agent.run_tools([
+        make_call("find_files", {"pattern": "*.csv"}),
+        make_call("read_file", {"path": "sales.csv"}),
+        make_call("write_file", {"path": "a.txt", "content": "x"}),
+    ]))
+
+    assert results[0] == "sales.csv"
+    assert "month,revenue" in results[1]
+    assert "only after selecting a managed project" in results[2]
+    assert "find_files" in agent.visible_tool_names()
+    assert "read_file" in agent.visible_tool_names()
     assert "write_file" not in agent.visible_tool_names()
 
 
@@ -438,6 +451,8 @@ def test_custom_system_prompt_keeps_local_file_guidance():
 
     assert prompt.startswith("Keep responses concise.")
     assert "search the Jinni workspace first" in prompt
+    assert "find_files(pattern='*.csv')" in prompt
+    assert "do not ask what they want done when they already said compare" in prompt
     assert "This CLI cannot see files attached to a separate chat." in prompt
     assert "Never claim to have checked without actually searching." in prompt
 
