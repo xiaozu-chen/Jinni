@@ -76,6 +76,8 @@ def test_settings_load_from_toml_and_keep_defaults(tmp_path):
         'model = "test-model"\n'
         'max_steps = 12\n'
         'embed_enabled = false\n'
+        'embed_server_command = "llama-server"\n'
+        'embed_server_args = ["--embedding", "--host", "127.0.0.1"]\n'
         'memory_db = "state/memory.db"\n'
         'embed_prefixes = [["nomic", "query: ", "document: "]]\n'
         '[[mcp_servers]]\n'
@@ -92,6 +94,8 @@ def test_settings_load_from_toml_and_keep_defaults(tmp_path):
     assert loaded.model == "test-model"
     assert loaded.max_steps == 12
     assert loaded.embed_enabled is False
+    assert loaded.embed_server_command == "llama-server"
+    assert loaded.embed_server_args == ("--embedding", "--host", "127.0.0.1")
     assert loaded.memory_db == Path("state/memory.db")
     assert loaded.keep_recent == settings.keep_recent
     assert loaded.embed_prefixes == (("nomic", "query: ", "document: "),)

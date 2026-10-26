@@ -65,6 +65,10 @@ class Settings:
     # semantic recall (optional: needs the embedding server on its own port)
     embed_enabled: bool = True
     embed_url: str = "http://127.0.0.1:8081/v1"
+    embed_server_command: str = ""
+    embed_server_args: tuple[str, ...] = ()
+    embed_server_start_timeout: float = 20.0
+    embed_server_stop_timeout: float = 5.0
     embed_model: str = "nomic-embed-text-v1.5"
     embed_query_prefix: str = "search_query: "
     embed_doc_prefix: str = "search_document: "
@@ -141,6 +145,10 @@ def load_settings(path: str | Path | None = None) -> Settings:
             )):
                 raise ValueError("embed_prefixes must be arrays of three strings")
             parsed[name] = tuple(tuple(item) for item in value)
+        elif name == "embed_server_args":
+            if not isinstance(value, list) or any(not isinstance(item, str) for item in value):
+                raise ValueError("embed_server_args must be an array of strings")
+            parsed[name] = tuple(value)
         elif name == "mcp_servers":
             if not isinstance(value, list) or any(not isinstance(item, dict) for item in value):
                 raise ValueError("mcp_servers must be an array of tables")
@@ -150,6 +158,9 @@ def load_settings(path: str | Path | None = None) -> Settings:
 
     if "near_duplicate_similarity" in parsed and not 0.0 <= parsed["near_duplicate_similarity"] <= 1.0:
         raise ValueError("near_duplicate_similarity must be between 0 and 1")
+    for timeout in ("embed_server_start_timeout", "embed_server_stop_timeout"):
+        if timeout in parsed and parsed[timeout] <= 0:
+            raise ValueError(f"{timeout} must be positive")
     return Settings(**parsed)
 
 

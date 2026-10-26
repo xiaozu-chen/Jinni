@@ -10,6 +10,9 @@ memory_db = "memory.db"
 log_file = "jinni.log"
 embed_enabled = true
 embed_url = "http://127.0.0.1:8081/v1"
+# Optional. If set, Jinni starts and stops only this configured process.
+# embed_server_command = "C:/llama.cpp/llama-server.exe"
+# embed_server_args = ["-m", "C:/models/nomic-embed-text-v1.5.Q8_0.gguf", "--embedding", "--pooling", "mean", "-c", "2048", "-ub", "2048", "-np", "1", "-ngl", "0", "--port", "8081", "--host", "127.0.0.1"]
 min_similarity = 0.5
 near_duplicate_similarity = 0.82
 mcp_enabled = true

@@ -1,4 +1,5 @@
 import asyncio
+import atexit
 import argparse
 import json
 import sys
@@ -24,6 +25,7 @@ from svgcharts import is_genuine_page
 from chart_records import check_chart_record, record_genuine_chart
 from audit import recent_calls
 from transcripts import load_transcript, save_transcript
+from embedding_server import EmbeddingServer
 from approval_store import load_approvals, save_approvals
 import project as project_tools
 import tools.workspace as workspace_tools
@@ -221,6 +223,10 @@ def main(argv: list[str] | None = None) -> None:
     agent = Agent(project_guidance=project_guidance, allowed_file=settings.allowed_file,
                   project_active=project_active)
     agent.allowed.update(load_approvals(settings.allowed_file))
+    embedding_server = EmbeddingServer(settings)
+    if embedding_server.configured:
+        print(f"  ({embedding_server.start()})")
+        atexit.register(embedding_server.stop)
     due = due_tasks()
     if due != "(task list is empty)":
         print("  Tasks due today or overdue:")
@@ -498,6 +504,7 @@ def main(argv: list[str] | None = None) -> None:
             except (Exception, KeyboardInterrupt) as e:
                 log.exception("MCP shutdown failed")
                 print(f"  (MCP shutdown problem: {type(e).__name__})")
+        embedding_server.stop()
 
 
 if __name__ == "__main__":
