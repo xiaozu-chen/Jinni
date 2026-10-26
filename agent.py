@@ -22,6 +22,7 @@ from audit import record_call
 from approval_preview import summarize_arguments
 
 log = logging.getLogger("jinni.agent")
+CHECKPOINTED_WRITES = {"write_file", "edit_file", "apply_patch", "delete_file", "make_chart", "fetch_table"}
 RETRYABLE = (openai.APIConnectionError, openai.InternalServerError)
 DECLINED = "The user declined this action. It was their choice, not a technical error. Do not retry; ask what they want instead."
 
@@ -108,6 +109,7 @@ class Agent:
         self.thinking_on: bool = settings.thinking_default
         self.parallel_tools: bool = settings.parallel_tools
         self.allowed: set[tuple[str, str]] = set()
+        self.write_checkpoint: str | None = None
         self.stats = {
             "laps": 0,
             "prompt_tokens": 0,
@@ -159,10 +161,24 @@ class Agent:
         runnable = sum(1 for args, _ in plans if args is not None)
         start = time.perf_counter()
         run_parallel = self.parallel_tools and not any(call.name == "ask_user" for call in calls)
+        if any(call.name in CHECKPOINTED_WRITES for call in calls):
+            run_parallel = False
 
         async def one(call: ToolCall, args: dict[str, Any] | None, refusal: str) -> str:
             if args is None:
                 return refusal
+            if call.name in CHECKPOINTED_WRITES:
+                try:
+                    import project
+                    from tools import workspace as workspace_tools
+
+                    checkpoint = await asyncio.to_thread(
+                        project.checkpoint_before_write, call.name, workspace_tools.WORKSPACE
+                    )
+                    if checkpoint:
+                        self.write_checkpoint = checkpoint
+                except (OSError, ValueError) as error:
+                    return f"Error: {error}"
             result = await execute(call, args)
             name = call.name.lower()
             if name == "web_search" or name.endswith("_search_text"):
@@ -317,6 +333,7 @@ class Agent:
 
     async def chat(self, user_text: str) -> None:
         turn_start = len(self.messages)
+        self.write_checkpoint = None
         try:
             await self._turn(user_text)
         except asyncio.CancelledError:

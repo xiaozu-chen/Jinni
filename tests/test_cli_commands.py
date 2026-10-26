@@ -21,6 +21,7 @@ def test_help_lists_the_interactive_commands():
     help_output = help_text()
 
     assert "/undo" in help_output
+    assert "/project [NAME]" in help_output
     assert "/audit [COUNT]" in help_output
     assert "/tasks" in help_output
     assert "/save [NAME]" in help_output

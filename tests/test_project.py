@@ -4,7 +4,8 @@ import tempfile
 import pytest
 
 from project import (
-    copy_project, create_project, list_projects, load_project_guidance, select_project,
+    checkpoint_before_write, copy_project, create_project, list_projects,
+    load_project_guidance, select_project, undo_last_checkpoint,
 )
 
 
@@ -49,6 +50,20 @@ def test_managed_project_can_be_created_listed_and_selected(project_tmp_path):
         create_project("new-project", projects)
     with pytest.raises(ValueError, match="project name"):
         create_project("../escape", projects)
+
+
+def test_git_checkpoint_restores_files_to_the_pre_write_snapshot(project_tmp_path):
+    project = create_project("checkpoint", project_tmp_path / "workspace" / "projects")
+    note = project / "note.txt"
+    note.write_text("before", encoding="utf-8")
+
+    checkpoint = checkpoint_before_write("write_file", project)
+    note.write_text("after", encoding="utf-8")
+
+    assert checkpoint
+    assert undo_last_checkpoint(project)
+    assert note.read_text(encoding="utf-8") == "before"
+    assert not undo_last_checkpoint(project)
 
 
 def test_project_copy_skips_symlinks_to_keep_original_out_of_reach(project_tmp_path):

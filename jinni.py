@@ -122,9 +122,17 @@ def undo_last_turn(agent: Agent) -> str:
     )
     if turn_start is None:
         return "(no chat turn to undo)"
+    restored = False
+    if getattr(agent, "write_checkpoint", None):
+        try:
+            restored = project_tools.undo_last_checkpoint(workspace_tools.WORKSPACE)
+        except (OSError, ValueError) as error:
+            return f"(could not undo the chat turn: {error})"
+        agent.write_checkpoint = None
     del agent.messages[turn_start:]
     agent.apply_memory()
-    return "(latest chat turn removed from conversation history)"
+    suffix = " and its last workspace write was restored" if restored else ""
+    return f"(latest chat turn removed from conversation history{suffix})"
 
 
 def stats_text(agent: Agent) -> str:

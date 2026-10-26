@@ -2,6 +2,7 @@ import re
 import shutil
 import os
 import subprocess
+import json
 from pathlib import Path
 
 SKIP_COPY_DIRS = {
@@ -10,6 +11,7 @@ SKIP_COPY_DIRS = {
 }
 MAX_GUIDANCE_BYTES = 32_000
 PROJECT_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+CHECKPOINTED_WRITES = {"write_file", "edit_file", "apply_patch", "delete_file", "make_chart", "fetch_table"}
 
 
 def _ignore_generated(directory: str, names: list[str]) -> set[str]:
@@ -49,8 +51,60 @@ def _initialize_project(path: Path, projects_dir: Path) -> None:
             ["git", "config", "commit.gpgsign", "false"], cwd=path,
             env=_git_environment(), check=True, capture_output=True, text=True,
         )
+        exclude = path / ".git" / "info" / "exclude"
+        exclude.parent.mkdir(parents=True, exist_ok=True)
+        with exclude.open("a", encoding="utf-8") as stream:
+            stream.write("\n.jinni/\n")
     except (OSError, subprocess.CalledProcessError) as error:
         raise ValueError(f"could not initialize the project repository ({type(error).__name__})") from None
+
+
+def checkpoint_before_write(tool_name: str, project_path: str | Path) -> str | None:
+    if tool_name not in CHECKPOINTED_WRITES:
+        return None
+    root = Path(project_path).expanduser().resolve()
+    if not (root / ".jinni" / "managed-project").is_file() or not (root / ".git").is_dir():
+        return None
+    environment = _git_environment()
+    try:
+        subprocess.run(["git", "add", "--all"], cwd=root, env=environment, check=True,
+                       capture_output=True, text=True)
+        subprocess.run(
+            ["git", "-c", "user.name=Jinni", "-c", "user.email=jinni@localhost",
+             "commit", "--quiet", "--allow-empty", "-m", f"Checkpoint before {tool_name}"],
+            cwd=root, env=environment, check=True, capture_output=True, text=True,
+        )
+        commit = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=root, env=environment, check=True,
+            capture_output=True, text=True,
+        ).stdout.strip()
+        marker = root / ".jinni" / "last-checkpoint.json"
+        temporary = marker.with_suffix(".tmp")
+        temporary.write_text(json.dumps({"commit": commit, "tool": tool_name}), encoding="utf-8")
+        os.replace(temporary, marker)
+        return commit
+    except (OSError, subprocess.CalledProcessError):
+        raise ValueError("could not save a Git checkpoint; the approved write was not run") from None
+
+
+def undo_last_checkpoint(project_path: str | Path) -> bool:
+    root = Path(project_path).expanduser().resolve()
+    marker = root / ".jinni" / "last-checkpoint.json"
+    if not marker.is_file() or not (root / ".git").is_dir():
+        return False
+    try:
+        data = json.loads(marker.read_text(encoding="utf-8"))
+        commit = data.get("commit")
+        if not isinstance(commit, str) or not re.fullmatch(r"[0-9a-f]{40,64}", commit):
+            raise ValueError
+        subprocess.run(
+            ["git", "reset", "--hard", commit], cwd=root, env=_git_environment(),
+            check=True, capture_output=True, text=True,
+        )
+        marker.unlink(missing_ok=True)
+        return True
+    except (OSError, ValueError, subprocess.CalledProcessError):
+        raise ValueError("could not restore the latest Git checkpoint") from None
 
 
 def list_projects(projects_dir: str | Path) -> list[Path]:
