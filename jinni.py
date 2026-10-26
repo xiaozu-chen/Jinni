@@ -100,7 +100,7 @@ def help_text() -> str:
   /undo              remove the latest chat turn from conversation history
   /project [NAME]    list or switch projects; /project create NAME makes one
   /subtask TASK      summarize prior work and start with a fresh context
-  /think             toggle model reasoning display
+  /think [on|off|auto] toggle reasoning, or return to automatic classification
   /parallel          toggle parallel tool calls
   /tools             list available tools
   /allowed           inspect saved domain approvals
@@ -128,6 +128,11 @@ def help_text() -> str:
 
 def config_text(config=settings, mcp_servers=None) -> str:
     mcp_servers = config.mcp_servers if mcp_servers is None else mcp_servers
+    thinking = (
+        f"automatic ({config.thinking_classifier_model})"
+        if config.thinking_classifier_model
+        else f"{'on' if config.thinking_default else 'off'} default"
+    )
     servers = ", ".join(
         f"{server.name} ({', '.join(server.tools) or 'no tools'})"
         for server in mcp_servers
@@ -136,7 +141,7 @@ def config_text(config=settings, mcp_servers=None) -> str:
         f"model: {config.model}",
         f"max steps: {config.max_steps}",
         f"context limit: {config.context_limit} tokens",
-        f"thinking by default: {'on' if config.thinking_default else 'off'}",
+        f"thinking: {thinking}",
         f"parallel tools: {'on' if config.parallel_tools else 'off'}",
         f"search: {config.search_backend} ({config.search_region})",
         f"memory limits: {config.max_facts} facts, {config.max_fact_chars} chars each, {config.memory_prompt_chars} prompt chars, {config.recall_results} recall results",
@@ -325,8 +330,20 @@ def main(argv: list[str] | None = None) -> None:
                             print(f"  (project switch failed: {error})")
                     continue
                 if cmd == "/think":
-                    agent.thinking_on = not agent.thinking_on
-                    print(f"  (thinking: {'on' if agent.thinking_on else 'off'})")
+                    mode = arg.strip().lower()
+                    if mode == "auto":
+                        agent.thinking_override = None
+                        print("  (thinking: automatic)")
+                    elif mode in ("on", "off"):
+                        agent.thinking_override = mode == "on"
+                        agent.thinking_on = agent.thinking_override
+                        print(f"  (thinking: {mode})")
+                    elif not mode:
+                        agent.thinking_on = not agent.thinking_on
+                        agent.thinking_override = agent.thinking_on
+                        print(f"  (thinking: {'on' if agent.thinking_on else 'off'}; manual)")
+                    else:
+                        print("  (usage: /think [on|off|auto])")
                     continue
                 if cmd == "/parallel":
                     agent.parallel_tools = not agent.parallel_tools

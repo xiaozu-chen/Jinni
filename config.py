@@ -32,6 +32,9 @@ class Settings:
     system_prompt: str = "You are Jinni, a helpful local AI agent. Keep answers concise."
     max_steps: int = 8
     thinking_default: bool = False
+    thinking_classifier_model: str = ""
+    thinking_classifier_base_url: str = "http://127.0.0.1:8082/v1"
+    thinking_classifier_timeout: float = 3.0
 
     # Read-only helper runs stay opt-in until the local A/B evaluation is recorded.
     subagents_enabled: bool = False
@@ -192,6 +195,8 @@ def load_settings(path: str | Path | None = None) -> Settings:
     for timeout in ("embed_server_start_timeout", "embed_server_stop_timeout"):
         if timeout in parsed and parsed[timeout] <= 0:
             raise ValueError(f"{timeout} must be positive")
+    if "thinking_classifier_timeout" in parsed and parsed["thinking_classifier_timeout"] <= 0:
+        raise ValueError("thinking_classifier_timeout must be positive")
     for delay in ("mcp_restart_initial_delay", "mcp_restart_max_delay"):
         if delay in parsed and parsed[delay] <= 0:
             raise ValueError(f"{delay} must be positive")

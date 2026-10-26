@@ -132,10 +132,20 @@ class Agent:
             timeout=settings.request_timeout, 
             max_retries=0
         )
+        self.thinking_classifier = (
+            AsyncOpenAI(
+                base_url=settings.thinking_classifier_base_url,
+                api_key="not-needed",
+                timeout=settings.thinking_classifier_timeout,
+                max_retries=0,
+            )
+            if settings.thinking_classifier_model else None
+        )
         self.system_prompt = system_prompt if system_prompt is not None else settings.system_prompt
         self.messages: list[Message] = [{"role": "system", "content": self.system_prompt}]
         self.summary: str = ""
         self.project_guidance = project_guidance
+        self.thinking_override = thinking_override
         self.thinking_on: bool = settings.thinking_default if thinking_override is None else thinking_override
         self.parallel_tools: bool = settings.parallel_tools
         self.allowed: set[tuple[str, str]] = set()
@@ -186,6 +196,44 @@ class Agent:
             base_delay=settings.retry_delay,
             retry_on=RETRYABLE,
         )
+
+    async def classify_thinking(self, user_text: str) -> bool:
+        if self.thinking_override is not None or self.thinking_classifier is None:
+            self.thinking_on = (
+                settings.thinking_default if self.thinking_override is None
+                else self.thinking_override
+            )
+            return self.thinking_on
+        try:
+            response = await self.thinking_classifier.chat.completions.create(
+                model=settings.thinking_classifier_model,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": (
+                            "Classify whether the request needs extended reasoning. "
+                            "Reply with exactly 'on' for multi-step, ambiguous, analytical, "
+                            "or code-related work; otherwise reply with exactly 'off'."
+                        ),
+                    },
+                    {"role": "user", "content": user_text[:4000]},
+                ],
+                temperature=0,
+                max_tokens=4,
+            )
+            label = response.choices[0].message.content
+            if not isinstance(label, str) or label.strip().lower() not in {"on", "off"}:
+                raise ValueError("classifier returned an invalid label")
+            self.thinking_on = label.strip().lower() == "on"
+            log.info("thinking classifier selected %s", "on" if self.thinking_on else "off")
+        except Exception as error:
+            self.thinking_on = settings.thinking_default
+            log.warning("thinking classifier failed (%s); using configured default", type(error).__name__)
+            self.emit(AgentEvent(
+                "status",
+                f"  (thinking classifier unavailable; using default: {'on' if self.thinking_on else 'off'})",
+            ))
+        return self.thinking_on
 
     def apply_memory(self) -> None:
         text = self.system_prompt
@@ -459,6 +507,9 @@ class Agent:
     async def _turn(self, user_text: str) -> None:
         turn_start = len(self.messages)
         log.info("user: %s", user_text[:200])
+        if self.thinking_override is None and self.thinking_classifier is not None:
+            selected = await self.classify_thinking(user_text)
+            self.emit(AgentEvent("status", f"  (thinking: {'on' if selected else 'off'}; classified)"))
         trust_urls_from_text(user_text)
         self.messages.append({"role": "user", "content": user_text})
 

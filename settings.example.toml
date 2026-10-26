@@ -4,6 +4,10 @@ system_prompt = "You are Jinni, a helpful local AI agent. Keep answers concise."
 max_steps = 8
 context_limit = 16384
 thinking_default = false
+# Optional tiny OpenAI-compatible classifier. Leave model empty to use the default above.
+# thinking_classifier_model = "your-small-model-alias"
+# thinking_classifier_base_url = "http://127.0.0.1:8082/v1"
+# thinking_classifier_timeout = 3.0
 # Read-only subagent research is disabled until the local A/B evaluation is recorded.
 subagents_enabled = false
 subagent_tools = ["read_file", "search_files", "find_files", "code_outline", "project_tree"]

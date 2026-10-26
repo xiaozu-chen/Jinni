@@ -25,6 +25,54 @@ def make_call(name, args):
     return ToolCall(id="1", name=name, arguments=json.dumps(args))
 
 
+def test_thinking_classifier_selects_a_strict_mode(monkeypatch):
+    agent = Agent()
+    requests = []
+
+    class Completions:
+        async def create(self, **kwargs):
+            requests.append(kwargs)
+            return SimpleNamespace(choices=[SimpleNamespace(
+                message=SimpleNamespace(content="on"),
+            )])
+
+    agent.thinking_classifier = SimpleNamespace(
+        chat=SimpleNamespace(completions=Completions()),
+    )
+    monkeypatch.setattr(
+        agent_mod, "settings",
+        replace(agent_mod.settings, thinking_classifier_model="tiny-router"),
+    )
+    selected = asyncio.run(agent.classify_thinking("Analyze this algorithm's complexity."))
+
+    assert selected is True
+    assert agent.thinking_on is True
+    assert requests[0]["model"] == "tiny-router"
+    assert requests[0]["temperature"] == 0
+    assert requests[0]["messages"][-1]["content"] == "Analyze this algorithm's complexity."
+
+
+def test_thinking_classifier_falls_back_on_invalid_output(monkeypatch):
+    agent = Agent()
+    agent.thinking_on = True
+
+    class Completions:
+        async def create(self, **kwargs):
+            return SimpleNamespace(choices=[SimpleNamespace(
+                message=SimpleNamespace(content="probably on"),
+            )])
+
+    agent.thinking_classifier = SimpleNamespace(
+        chat=SimpleNamespace(completions=Completions()),
+    )
+    monkeypatch.setattr(
+        agent_mod, "settings", replace(agent_mod.settings, thinking_default=False),
+    )
+
+    assert asyncio.run(agent.classify_thinking("Do something")) is False
+    assert agent.thinking_on is False
+
+
 def test_unknown_tool():
     args, message = authorize(make_call("hack_pc", {}))
     assert args is None

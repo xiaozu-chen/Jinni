@@ -32,6 +32,7 @@ def test_help_lists_the_interactive_commands():
     help_output = help_text()
 
     assert "/undo" in help_output
+    assert "/think [on|off|auto]" in help_output
     assert "/project [NAME]" in help_output
     assert "/subtask TASK" in help_output
     assert "/audit [COUNT]" in help_output
@@ -122,6 +123,7 @@ def test_settings_load_from_toml_and_keep_defaults(tmp_path):
     [
         ('unknown_key = "value"\n', "unknown settings"),
         ('max_steps = true\n', "max_steps must be an integer"),
+        ('thinking_classifier_timeout = 0\n', "thinking_classifier_timeout must be positive"),
     ],
 )
 def test_settings_reject_unknown_keys_and_wrong_types(tmp_path, text, message):
@@ -150,6 +152,12 @@ def test_config_shows_effective_settings_without_secrets():
     assert "secret-value" not in output
     assert "TOKEN" not in output
     assert "base_url" not in output
+
+
+def test_config_shows_automatic_thinking_classifier():
+    config = replace(settings, thinking_classifier_model="tiny-local-model")
+
+    assert "thinking: automatic (tiny-local-model)" in config_text(config)
 
 
 def test_undo_removes_latest_user_turn_and_refreshes_prompt():

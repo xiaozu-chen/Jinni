@@ -42,7 +42,11 @@ jinni
 
 Or run `python jinni.py`. Type `exit` to leave. `/help` lists the CLI commands. Use `/project PATH` to work on a managed copy of a repository; without a selected project, Jinni uses its regular `workspace` folder.
 
-Thinking is off by default. `/think` toggles it for the current session. The read-only `delegate` helper is disabled by default; enabling `subagents_enabled` in `settings.toml` exposes it.
+See [the command reference](docs/COMMANDS.md) for every slash command and common project command.
+
+Thinking is off by default. `/think` toggles a manual override for the current session. The read-only `delegate` helper is disabled by default; enabling `subagents_enabled` in `settings.toml` exposes it.
+
+To choose thinking automatically, run a small OpenAI-compatible chat model on a separate local endpoint (port 8082 by default), then set `thinking_classifier_model` to the model name served there and `thinking_classifier_base_url` to that endpoint in `settings.toml`. The classifier sees only the latest user message and must answer `on` or `off`; if it is unavailable or returns an invalid label, Jinni uses `thinking_default`. `/think on` and `/think off` set a session override; `/think auto` returns control to the classifier.
 
 ## Verify changes
 
