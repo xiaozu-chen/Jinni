@@ -14,10 +14,10 @@ class FakeProcess:
         self.calls = 0
         self.killed = False
 
-    def communicate(self, timeout=None):
+    def communicate(self, timeout: float | None = None) -> tuple[bytes, bytes]:
         self.calls += 1
         if self.timeout and self.calls == 1:
-            raise subprocess.TimeoutExpired("browser", timeout)
+            raise subprocess.TimeoutExpired("browser", timeout if timeout is not None else 0.0)
         return b"out", b"err"
 
     def kill(self):

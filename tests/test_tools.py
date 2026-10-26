@@ -407,7 +407,7 @@ def test_same_site_redirect_is_followed(monkeypatch):
 def _web_client(
     responses: list[httpx.Response], calls: list[str] | None = None,
 ) -> type:
-    calls = [] if calls is None else calls
+    call_log: list[str] = [] if calls is None else calls
 
     class Client:
         def __init__(self, **kwargs):
@@ -420,7 +420,7 @@ def _web_client(
             return False
 
         def stream(self, method: str, url: str, **kwargs):
-            calls.append(url)
+            call_log.append(url)
             response = responses.pop(0)
 
             class Stream:

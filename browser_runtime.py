@@ -3,6 +3,8 @@ from __future__ import annotations
 import os
 import signal
 import subprocess
+from collections.abc import Callable
+from typing import cast
 
 IS_WINDOWS = os.name == "nt"
 
@@ -34,7 +36,8 @@ def run_browser_command(command: list[str], timeout: float) -> subprocess.Comple
         else:
             try:
                 if process.pid is not None:
-                    getattr(os, "killpg")(process.pid, signal.SIGKILL)
+                    kill_process_group = cast(Callable[[int, int], None], getattr(os, "killpg"))
+                    kill_process_group(process.pid, int(signal.SIGKILL))
             except ProcessLookupError:
                 pass
         try:
