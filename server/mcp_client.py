@@ -367,7 +367,9 @@ class McpServer:
             params = sdk.StdioServerParameters(
                 command=exe, args=list(self.cfg.args), env=dict(self.cfg.env) or None
             )
-            errlog = open(f"mcp-{clean(self.cfg.name)}.log", "a", encoding="utf-8")
+            log_path = Path("data/logs") / f"mcp-{clean(self.cfg.name)}.log"
+            log_path.parent.mkdir(parents=True, exist_ok=True)
+            errlog = log_path.open("a", encoding="utf-8")
             extra: dict[str, Any] = {} if self.cfg.mode == "auto" else {"mode": self.cfg.mode}
             async with sdk.Client(
                 sdk.stdio_client(params, errlog=errlog),

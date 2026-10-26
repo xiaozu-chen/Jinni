@@ -7,6 +7,11 @@ jinni.log
 .pytest_cache
 memory.db
 mcp-*.log
+data/logs/*.log
+data/logs/*.jsonl
+data/memory/memory.db
+data/memory/memory.txt
+data/mcp_servers.json
 freeze-*.txt
 settings.toml
 build/

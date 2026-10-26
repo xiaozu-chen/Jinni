@@ -54,6 +54,8 @@ class Proposal:
 
 class MemoryStore:
     def __init__(self, path: Path | str) -> None:
+        if str(path) != ":memory:":
+            Path(path).parent.mkdir(parents=True, exist_ok=True)
         self.conn = sqlite3.connect(path, check_same_thread=False)
         self.lock = threading.Lock()
         self.session_id = f"{date.today():%Y%m%d}-{uuid4().hex[:6]}"

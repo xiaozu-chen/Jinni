@@ -221,7 +221,7 @@ fix may do: remember a domain, a quieter prompt, or batched approvals.
 - [x] **DNS rebinding gap in `fetch_url`:** we check the address, then the HTTP client looks it up again. Close it by connecting to the checked IP. _[M / medium]_
 - [x] **Download size cap for `fetch_url`:** stream with a limit instead of reading the whole response. _[S / low]_
 - [x] **Warn when one fetch result eats a lot of context** (digit-heavy text costs roughly one token per character). _[S / low]_
-- [x] **Secrets scrubbing in `jinni.log`:** it holds conversations, file snippets and 200-character tool-result previews. _[S / low]_
+- [x] **Secrets scrubbing in `data/logs/jinni.log`:** it holds conversations, file snippets and 200-character tool-result previews. _[S / low]_
 - [x] **A "genuine page" record** (hash) instead of exact-match regeneration. _[S / low]_
 
 ---
@@ -367,7 +367,7 @@ Things that work but have a known weakness.
 - **The 4B may skip `remember`** or over-call `recall`; the exit review is the safety net.
 - **Keyword + meaning search only helps if the model calls `recall`;** use `/recall` to test the search itself.
 - **Memory is only saved on a clean exit.** A crash or closing the terminal loses the session on purpose (nothing unreviewed is saved).
-- **`memory.db` and `jinni.log` are plain files with personal data** (both gitignored; keep it that way).
+- **`data/memory/memory.db` and `data/logs/jinni.log` are plain files with personal data** (both gitignored; keep it that way).
 - **Chart colors and tooltips were not tested for every color-vision type.**
 - **The tool menu grows with every tool and MCP server,** and small models get worse at choosing as it grows.
 - **PNG export depends on browser flags that can change,** and on Windows the screenshot size may be clamped (the real size is read from the file and printed).

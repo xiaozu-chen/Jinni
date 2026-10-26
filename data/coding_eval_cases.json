@@ -1,0 +1,70 @@
+[
+  {
+    "name": "clamp-negative-count",
+    "prompt": "Fix the slice so a negative count returns no items rather than slicing from the end.",
+    "files": {
+      "items.py": "def first_items(items, count):\n    return items[:count]\n"
+    },
+    "contains": {
+      "items.py": ["max(0, count)"]
+    },
+    "absent": {},
+    "ordered": {}
+  },
+  {
+    "name": "handle-empty-average",
+    "prompt": "Make average return None for an empty list and the arithmetic mean otherwise.",
+    "files": {
+      "stats.py": "def average(values):\n    return sum(values) / len(values)\n"
+    },
+    "contains": {
+      "stats.py": ["if not values", "return None"]
+    },
+    "absent": {},
+    "ordered": {
+      "stats.py": ["if not values", "return None", "sum(values) / len(values)"]
+    }
+  },
+  {
+    "name": "preserve-first-seen-unique-values",
+    "prompt": "Return the unique values in their original first-seen order.",
+    "files": {
+      "unique.py": "def unique(values):\n    return list(set(values))\n"
+    },
+    "contains": {
+      "unique.py": ["seen = set()", "result = []", "return result"]
+    },
+    "absent": {
+      "unique.py": ["list(set(values))"]
+    },
+    "ordered": {
+      "unique.py": ["seen = set()", "result = []", "return result"]
+    }
+  },
+  {
+    "name": "ignore-blank-lines",
+    "prompt": "Count only non-empty lines after trimming surrounding whitespace.",
+    "files": {
+      "lines.py": "def count_nonempty(text):\n    return len(text.splitlines())\n"
+    },
+    "contains": {
+      "lines.py": ["line.strip()", "if line.strip()"]
+    },
+    "absent": {},
+    "ordered": {}
+  },
+  {
+    "name": "safe-dictionary-lookup",
+    "prompt": "Return the requested value or the provided default when the key is missing.",
+    "files": {
+      "lookup.py": "def lookup(mapping, key, default=None):\n    return mapping[key]\n"
+    },
+    "contains": {
+      "lookup.py": ["mapping.get(key, default)"]
+    },
+    "absent": {
+      "lookup.py": ["mapping[key]"]
+    },
+    "ordered": {}
+  }
+]

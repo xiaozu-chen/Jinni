@@ -9,6 +9,7 @@ def setup_logging() -> None:
     if logger.handlers:
         return
     logger.setLevel(logging.DEBUG)
+    settings.log_file.parent.mkdir(parents=True, exist_ok=True)
     handler = RotatingFileHandler(
         settings.log_file, maxBytes=500_000, backupCount=2, encoding="utf-8"
     )

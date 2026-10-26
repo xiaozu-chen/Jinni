@@ -14,7 +14,7 @@ import httpx
 from settings.config import settings
 from tools import TOOL_SCHEMAS
 
-DEFAULT_CASES = Path(__file__).resolve().parents[1] / "eval_cases.json"
+DEFAULT_CASES = Path(__file__).resolve().parents[1] / "data" / "eval_cases.json"
 
 
 @dataclass(frozen=True)

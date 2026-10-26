@@ -13,13 +13,13 @@ pre-commit install
 
 For server startup, see [RUNNING.md](RUNNING.md). For interactive and developer commands, see the [command reference](docs/COMMANDS.md).
 
-Install Jinni as a command with `python -m pip install -e .`. Copy `settings.example.toml` to `settings.toml` to override defaults; `JINNI_SETTINGS` can point to another TOML file. Unknown keys and values with the wrong type are rejected at startup. MCP server allowlists can still be managed in `mcp_servers.json`.
+Install Jinni as a command with `python -m pip install -e .`. Copy `settings.example.toml` to `settings.toml` to override defaults; `JINNI_SETTINGS` can point to another TOML file. Unknown keys and values with the wrong type are rejected at startup. Runtime memory and logs are stored under `data/memory/` and `data/logs/`. MCP server allowlists can be managed in `data/mcp_servers.json`.
 
 Run `python -m pytest`, `ruff check .`, and `pyright` before opening a pull request. CI runs the same checks on pushes and pull requests.
 
 ## Model evaluation
 
-Run `python -m bench.eval_harness` against the configured local chat server to measure expected tool selection. The default matrix compares thinking on/off and menus of 8/all tools. Use `--models qwen3,qwen3.5`, `--menu-sizes 5,10,all`, or `--prompts prompt_variants.json` to compare named system prompts from a JSON object. `--server-context 16384` adds a context-size label; restart the local server with the matching context before each run. Cases and expected calls live in `eval_cases.json`; tools absent from a smaller menu are skipped so the score measures selection among available tools.
+Run `python -m bench.eval_harness` against the configured local chat server to measure expected tool selection. The default matrix compares thinking on/off and menus of 8/all tools. Use `--models qwen3,qwen3.5`, `--menu-sizes 5,10,all`, or `--prompts data/prompt_variants.json` to compare named system prompts from a JSON object. `--server-context 16384` adds a context-size label; restart the local server with the matching context before each run. Cases and expected calls live in `data/eval_cases.json`; tools absent from a smaller menu are skipped so the score measures selection among available tools.
 
 ## Charts and data
 
@@ -38,9 +38,9 @@ Chart export commands save files beside the HTML chart:
 
 CSV files created or edited with Jinni also get a hash-checked sidecar, so charts keep the "typed by Jinni, numbers unverified" notice after a restart.
 
-To bridge data from MCP, configure an allowlisted server tool that returns JSON with `columns` and `rows`, then use `/mcp-table <server> <tool> [JSON arguments]`. The repository includes a local sales fixture at `tests/fixtures/chart_data_server.py`; configure it in `mcp_servers.json` to try `/mcp-table fixture get_table {"dataset":"sales"}`. The file has a top-level `servers` list; each entry can set `name`, `command`, `args`, `env`, `tools`, `remember`, `call_timeout`, and `mode`. If the file is missing, Jinni uses the built-in settings; an invalid file is reported and ignored.
+To bridge data from MCP, configure an allowlisted server tool that returns JSON with `columns` and `rows`, then use `/mcp-table <server> <tool> [JSON arguments]`. The repository includes a local sales fixture at `tests/fixtures/chart_data_server.py`; configure it in `data/mcp_servers.json` to try `/mcp-table fixture get_table {"dataset":"sales"}`. The file has a top-level `servers` list; each entry can set `name`, `command`, `args`, `env`, `tools`, `remember`, `call_timeout`, and `mode`. If the file is missing, Jinni uses the built-in settings; an invalid file is reported and ignored.
 
-MCP tool calls are checked against each server's advertised input schema before they are sent. Tools also must be explicitly allowlisted in `mcp_servers.json` or the built-in settings.
+MCP tool calls are checked against each server's advertised input schema before they are sent. Tools also must be explicitly allowlisted in `data/mcp_servers.json` or the built-in settings.
 
 Use `/replay start NAME` to record model requests and expected tool choices locally, `/replay stop` to finish, and `/replay run NAME [MODEL]` to compare choices against a model. Replays store conversation context under `workspace/.jinni/replays/`; only start recording when that local data is appropriate to save. Replay never runs the model's selected tools.
 

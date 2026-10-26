@@ -56,7 +56,7 @@ class Settings:
     keep_turns: int = 2
 
     # files
-    memory_file: Path = Path("memory.txt")
+    memory_file: Path = Path("data/memory/memory.txt")
 
     # reliability
     request_timeout: float = 120.0
@@ -65,14 +65,14 @@ class Settings:
     parallel_tools: bool = True
 
     # logging
-    log_file: Path = Path("jinni.log")
+    log_file: Path = Path("data/logs/jinni.log")
 
     # search
     search_backend: str = "auto"
     search_region: str = "us-en"
 
     # memory
-    memory_db: Path = Path("memory.db")
+    memory_db: Path = Path("data/memory/memory.db")
     allowed_file: Path = Path("workspace/.jinni/allowed.json")
     max_facts: int = 20
     max_fact_chars: int = 200
@@ -99,7 +99,7 @@ class Settings:
 
     # MCP (optional: Jinni works without any of it)
     mcp_enabled: bool = True
-    mcp_servers_file: Path = Path("mcp_servers.json")
+    mcp_servers_file: Path = Path("data/mcp_servers.json")
     mcp_servers: tuple[McpServerConfig, ...] = (
         McpServerConfig(name="ddgs", command="ddgs", args=("mcp",), tools=("search_text",)),
     )

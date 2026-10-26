@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 
 from tools import workspace
 
-AUDIT_DIR = ".jinni"
+AUDIT_DIR = "data/logs"
 AUDIT_FILE = "audit.jsonl"
 REDACTED_KEYS = {"content", "old_text", "new_text"}
 MAX_AUDIT_ROWS = 5000
