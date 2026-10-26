@@ -11,6 +11,8 @@ python -m pip install -r requirements-lock.txt -r requirements-dev.txt
 pre-commit install
 ```
 
+For server startup, CLI use, and the full verification commands, see [RUNNING.md](RUNNING.md).
+
 Install Jinni as a command with `python -m pip install -e .`. Copy `settings.example.toml` to `settings.toml` to override defaults; `JINNI_SETTINGS` can point to another TOML file. Unknown keys and values with the wrong type are rejected at startup. MCP server allowlists can still be managed in `mcp_servers.json`.
 
 Run `python -m pytest`, `ruff check .`, and `pyright` before opening a pull request. CI runs the same checks on pushes and pull requests.

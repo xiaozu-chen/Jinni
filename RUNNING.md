@@ -1,0 +1,70 @@
+# Running Jinni
+
+Jinni is a Python 3.11 CLI that connects to a local OpenAI-compatible chat server. It expects the chat server at `127.0.0.1:8080` and, when semantic memory is enabled, an embedding server at `127.0.0.1:8081`.
+
+## Set up the environment
+
+From the repository root in PowerShell:
+
+```powershell
+python -m venv venv
+venv\Scripts\Activate.ps1
+python -m pip install -r requirements-lock.txt -r requirements-dev.txt
+python -m pip install -e .
+if (-not (Test-Path settings.toml)) { Copy-Item settings.example.toml settings.toml }
+```
+
+Edit `settings.toml` for your model names or server URLs. It is ignored by Git. `JINNI_SETTINGS` can point Jinni at a settings file elsewhere.
+
+## Start the local model servers
+
+Start the chat server in one terminal, replacing the model path with your local model:
+
+```powershell
+llama-server -m C:\models\qwen3.5.gguf -c 16384 --jinja --host 127.0.0.1 --port 8080 -ngl 99
+```
+
+If semantic memory is enabled, start the embedding server in another terminal:
+
+```powershell
+llama-server -m C:\models\nomic-embed-text-v1.5.Q8_0.gguf --embedding --pooling mean -c 2048 -ub 2048 -np 1 -ngl 0 --host 127.0.0.1 --port 8081
+```
+
+You can instead configure `embed_server_command` and `embed_server_args` so Jinni manages the embedding process. Set `embed_enabled = false` when you do not want semantic memory.
+
+## Run Jinni
+
+From the repository root:
+
+```powershell
+jinni
+```
+
+Or run `python jinni.py`. Type `exit` to leave. `/help` lists the CLI commands. Use `/project PATH` to work on a managed copy of a repository; without a selected project, Jinni uses its regular `workspace` folder.
+
+Thinking is off by default. `/think` toggles it for the current session. The read-only `delegate` helper is disabled by default; enabling `subagents_enabled` in `settings.toml` exposes it.
+
+## Verify changes
+
+Run the checks from the repository root:
+
+```powershell
+python -m pytest
+ruff check .
+pyright
+```
+
+For the local subagent A/B evaluation, make sure the chat server is running and run:
+
+```powershell
+python subagent_eval.py
+```
+
+This compares the same research tasks with delegation off and on. It does not change the normal `subagents_enabled` setting.
+
+## Repository notes
+
+- `docs/IDEAS.md` is the roadmap; `docs/SUBAGENTS.md` records the subagent design and acceptance checks.
+- `tools/` contains registered model tools. The application modules remain at the repository root because the package configuration installs them as top-level Python modules.
+- `tests/fixtures/` contains local MCP servers used by integration tests.
+- `workspace/`, `settings.toml`, memory databases, logs, and local replays are runtime data and are ignored by Git.

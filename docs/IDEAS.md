@@ -1,6 +1,6 @@
 # Jinni: ideas, roadmap and known gaps
 
-_Last updated: 2026-10-25 · last stable tag: `v0.17-stable`_
+_Last updated: 2026-10-26 · last stable tag: `v0.17-stable`_
 
 This file is the parking lot. An idea written down here is saved; building it can wait.
 When an idea gets built, tick its box and move on. When a new idea shows up mid-step, it
@@ -350,7 +350,7 @@ us backend and region control). MCP earns its keep with servers that are not Pyt
 - [x] **Dependency pins:** a lock file (`pip freeze`), and note that `mcp` is pinned `>=2,<3`. `httpx` is pinned directly because the app imports it. _[S / low]_
 - [x] **Replace broad `except Exception`** with specific handlers where the failure is understood. _[S / low]_
 - [x] **Log tool tracebacks** inside the tools' own `except` blocks (swallowed errors made a past typo hard to find). _[S / low]_
-- [ ] **Keep `RUNNING.md` current** (see Appendix C).
+- [x] **Keep `RUNNING.md` current** (see Appendix C).
 
 ---
 
@@ -444,15 +444,4 @@ outside isolation; `/safe` always returns to asking; the model can never change 
 
 ## Appendix C: RUNNING.md (keep in the project root)
 
-```markdown
-# Running Jinni
-1. Chat server:   llama-server -m C:\models\<your-model>.gguf -c 16384 -ngl 99 --jinja --port 8080
-2. Embeddings:    llama-server -m C:\models\nomic-embed-text-v1.5.Q8_0.gguf --embedding --pooling mean -c 2048 -ub 2048 -np 1 -ngl 0 --port 8081 --host 127.0.0.1
-3. Jinni:         venv\Scripts\activate ; python jinni.py
-Tests:            pytest
-Last good state:  git checkout v0.17-stable
-Parked ideas:     IDEAS.md
-```
-
-Notes: use `127.0.0.1`, not `localhost` (it avoided a ~2 s IPv6 delay on Windows). Thinking is off by default for
-Qwen3.5 small models (`/think` toggles it per session).
+The root `RUNNING.md` is the operational quick start. Keep its server commands, settings notes, and verification steps aligned with `README.md` and `settings.example.toml`. Prefer editing the root guide over keeping a second copy of its commands here.
