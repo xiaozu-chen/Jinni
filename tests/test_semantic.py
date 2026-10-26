@@ -10,7 +10,7 @@ import pytest
 import semantic
 from bench_embed import threshold_summary
 from config import settings
-from semantic import EmbedError, catch_up, fuse, hybrid_search, semantic_search
+from semantic import EmbedError, catch_up, fuse, hybrid_search, rerank, semantic_search
 from tools.memory_tools import recall
 
 CONCEPTS = {"dog": 0, "canine": 0, "puppy": 0, "cat": 1, "feline": 1, "python": 2, "code": 2}
@@ -177,6 +177,15 @@ def test_semantic_search_finds_meaning_without_shared_words(memory_store, fake_s
     assert [i for i, _ in found] == [puppy.id]
 
 
+def test_embedding_duplicate_review_finds_near_duplicate_facts(memory_store, fake_server):
+    from semantic import similar_facts_by_embedding
+
+    saved = memory_store.add("fact", "The user owns a puppy.")
+    catch_up(memory_store)
+
+    assert similar_facts_by_embedding(memory_store, "A canine companion") == [saved]
+
+
 def test_semantic_search_ignores_unrelated_text(memory_store, fake_server):
     memory_store.add("fact", "The user owns a puppy.")
     catch_up(memory_store)
@@ -185,6 +194,10 @@ def test_semantic_search_ignores_unrelated_text(memory_store, fake_server):
 
 def test_fuse_rewards_agreement():
     assert fuse([[1, 2, 3], [3, 9]], 3) == [3, 1, 2]
+
+
+def test_rerank_uses_semantic_scores_to_reorder_fused_candidates():
+    assert rerank([1, 2], [1, 2], {1: 0.6, 2: 0.9}, 2) == [2, 1]
 
 
 def test_hybrid_combines_keyword_and_meaning(memory_store, fake_server):

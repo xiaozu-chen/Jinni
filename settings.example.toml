@@ -11,6 +11,7 @@ log_file = "jinni.log"
 embed_enabled = true
 embed_url = "http://127.0.0.1:8081/v1"
 min_similarity = 0.5
+near_duplicate_similarity = 0.82
 mcp_enabled = true
 mcp_servers_file = "mcp_servers.json"
 png_theme = "light"

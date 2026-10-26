@@ -60,6 +60,7 @@ class Settings:
     memory_prompt_chars: int = 2400
     max_event_chars: int = 600
     recall_results: int = 5
+    near_duplicate_similarity: float = 0.82
 
     # semantic recall (optional: needs the embedding server on its own port)
     embed_enabled: bool = True
@@ -147,6 +148,8 @@ def load_settings(path: str | Path | None = None) -> Settings:
         else:
             raise ValueError(f"unsupported setting type: {name}")
 
+    if "near_duplicate_similarity" in parsed and not 0.0 <= parsed["near_duplicate_similarity"] <= 1.0:
+        raise ValueError("near_duplicate_similarity must be between 0 and 1")
     return Settings(**parsed)
 
 

@@ -2,6 +2,7 @@ from datetime import date, timedelta
 
 from memory import Proposal
 from review import review, review_stale_facts
+import review as review_module
 
 FACT = Proposal("fact", "The user's name is Carl.")
 NOTE = Proposal("event", "Read mm.txt.")
@@ -38,6 +39,17 @@ def test_possible_fact_conflict_is_shown_before_saving_both(memory_store, monkey
 
     assert "may overlap with saved fact" in capsys.readouterr().out
     assert [item.text for item in memory_store.facts()] == ["Likes tea.", "Likes coffee."]
+
+
+def test_embedding_duplicate_warning_is_shown(memory_store, monkeypatch, capsys):
+    saved = memory_store.add("fact", "Canine companions are fun.")
+    monkeypatch.setattr(review_module, "similar_facts_by_embedding", lambda store, text: [saved])
+
+    assert run_review(memory_store, monkeypatch, ["n"], [Proposal("fact", "Enjoys a puppy.")]) == 0
+
+    output = capsys.readouterr().out
+    assert "may overlap with saved fact" in output
+    assert "Canine companions are fun." in output
 
 
 def test_quit_stops(memory_store, monkeypatch):

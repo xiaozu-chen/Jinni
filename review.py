@@ -1,6 +1,7 @@
 from datetime import date, timedelta
 
 from memory import MemoryStore, Proposal, Rejected
+from semantic import EmbedError, similar_facts_by_embedding
 
 STALE_FACT_DAYS = 365
 
@@ -15,6 +16,13 @@ def review(store: MemoryStore, proposals: list[Proposal]) -> int:
         text = proposal.text
         while True:
             related = store.similar_facts(text) if proposal.kind == "fact" else []
+            if proposal.kind == "fact":
+                try:
+                    embedded = similar_facts_by_embedding(store, text)
+                except EmbedError:
+                    embedded = []
+                known_ids = {item.id for item in related}
+                related.extend(item for item in embedded if item.id not in known_ids)
             if related:
                 print("  This fact may overlap with saved fact(s):")
                 for item in related:

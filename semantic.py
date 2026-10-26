@@ -145,6 +145,21 @@ def semantic_search(store: MemoryStore, query: str, limit: int) -> list[tuple[in
     return [(ids[j], float(scores[j])) for j in order if scores[j] >= settings.min_similarity]
 
 
+def similar_facts_by_embedding(store: MemoryStore, query: str, limit: int = 3) -> list[Memory]:
+    if not settings.embed_enabled or not query.strip() or limit <= 0:
+        return []
+    catch_up(store)
+    matches = semantic_search(store, query, max(20, limit * 4))
+    found = []
+    for memory_id, score in matches:
+        item = store.get(memory_id)
+        if item and item.kind == "fact" and score >= settings.near_duplicate_similarity:
+            found.append(item)
+            if len(found) == limit:
+                break
+    return found
+
+
 def fuse(rankings: list[list[int]], limit: int) -> list[int]:
     """Reciprocal rank fusion: items that rank well in several lists float to the top."""
     scores: dict[int, float] = {}
@@ -152,6 +167,19 @@ def fuse(rankings: list[list[int]], limit: int) -> list[int]:
         for rank, memory_id in enumerate(ranking, start=1):
             scores[memory_id] = scores.get(memory_id, 0.0) + 1.0 / (RRF_K + rank)
     return sorted(scores, key=lambda i: (-scores[i], i))[:limit]
+
+
+def rerank(ids: list[int], keyword_ids: list[int], semantic_scores: dict[int, float], limit: int) -> list[int]:
+    keyword_ranks = {memory_id: rank for rank, memory_id in enumerate(keyword_ids)}
+    original_ranks = {memory_id: rank for rank, memory_id in enumerate(ids)}
+
+    def score(memory_id: int) -> float:
+        semantic_score = semantic_scores.get(memory_id, 0.0)
+        keyword_rank = keyword_ranks.get(memory_id)
+        keyword_score = 1.0 / (keyword_rank + 1) if keyword_rank is not None else 0.0
+        return semantic_score * 0.7 + keyword_score * 0.3
+
+    return sorted(ids, key=lambda memory_id: (-score(memory_id), original_ranks[memory_id]))[:limit]
 
 
 def hybrid_search(store: MemoryStore, query: str, limit: int | None = None) -> tuple[list[Memory], str]:
@@ -181,7 +209,10 @@ def hybrid_search(store: MemoryStore, query: str, limit: int | None = None) -> t
                 found = store.get(memory_id)
                 if found:
                     known[memory_id] = found
-        ids = fuse([[m.id for m in by_keyword], [i for i, _ in by_meaning]], limit)
+        keyword_ids = [m.id for m in by_keyword]
+        semantic_scores = dict(by_meaning)
+        ids = fuse([keyword_ids, list(semantic_scores)], limit * 4)
+        ids = rerank(ids, keyword_ids, semantic_scores, limit)
         results = [known[i] for i in ids if i in known]
 
     log.info("recall %r: %d result(s), mode=%s", query[:60], len(results), mode)
