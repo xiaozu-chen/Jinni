@@ -95,6 +95,7 @@ def help_text() -> str:
   /config            show effective settings (sensitive values are hidden)
   /undo              remove the latest chat turn from conversation history
   /project [NAME]    list or switch projects; /project create NAME makes one
+  /subtask TASK      summarize prior work and start with a fresh context
   /think             toggle model reasoning display
   /parallel          toggle parallel tool calls
   /tools             list available tools
@@ -283,6 +284,15 @@ def main(argv: list[str] | None = None) -> None:
                     continue
                 if cmd == "/undo":
                     print(undo_last_turn(agent))
+                    continue
+                if cmd == "/subtask":
+                    try:
+                        print(f"  ({runner.run(agent.start_subtask(arg))})")
+                    except (OSError, ValueError) as error:
+                        print(f"  (could not start subtask: {error})")
+                    except Exception as error:
+                        log.exception("starting subtask failed")
+                        print(f"  (could not summarize prior work: {type(error).__name__})")
                     continue
                 if cmd == "/project":
                     if not arg.strip() or arg.strip() == "list":

@@ -405,6 +405,45 @@ def test_step_limit_offers_to_continue(monkeypatch):
     assert agent.messages[-1] == {"role": "assistant", "content": "finished"}
 
 
+def test_start_subtask_keeps_a_short_reference_and_resets_history(monkeypatch, memory_store):
+    requests = []
+    events = []
+
+    async def fake_request(self, **kwargs):
+        requests.append(kwargs)
+        message = SimpleNamespace(content="Project uses pytest. Update parser.py; test remains pending.")
+        return SimpleNamespace(choices=[SimpleNamespace(message=message)])
+
+    monkeypatch.setattr(Agent, "request", fake_request)
+    agent = Agent(store=memory_store, project_guidance="Use the existing formatter.", event_sink=events.append)
+    agent.summary = "Earlier compaction notes"
+    agent.messages.extend([
+        {"role": "user", "content": "Fix the parser"},
+        {"role": "assistant", "content": "I will inspect parser.py"},
+        {"role": "tool", "content": "old tool output"},
+    ])
+
+    result = asyncio.run(agent.start_subtask("Add coverage for empty input"))
+
+    assert result == "fresh subtask context started"
+    assert "untrusted" in requests[0]["messages"][0]["content"]
+    assert "Earlier compaction notes" in requests[0]["messages"][1]["content"]
+    assert "parser.py" in requests[0]["messages"][1]["content"]
+    assert len(agent.messages) == 3
+    assert "existing formatter" in agent.messages[0]["content"]
+    assert "untrusted and possibly incomplete" in agent.messages[1]["content"]
+    assert agent.messages[2]["content"] == "New subtask: Add coverage for empty input"
+    assert agent.summary == ""
+    assert events[-1].kind == "status"
+
+
+def test_start_subtask_rejects_empty_or_oversized_task():
+    agent = Agent()
+
+    with pytest.raises(ValueError, match="between 1 and 2,000"):
+        asyncio.run(agent.start_subtask("  "))
+
+
 def test_step_limit_stops_when_user_says_no(monkeypatch, capsys):
     monkeypatch.setattr(agent_mod, "settings", replace(agent_mod.settings, max_steps=1))
     monkeypatch.setattr("builtins.input", lambda _: "n")
