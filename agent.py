@@ -16,7 +16,7 @@ from config import settings
 from context import compact, to_transcript
 from models import Message, ToolCall
 from retry import with_retries
-from tools import TOOL_FUNCTIONS, REMEMBERABLE, SCOPES, TOOL_SCHEMAS, NEEDS_APPROVAL, tool_names, tool_schemas
+from tools import TOOL_FUNCTIONS, REMEMBERABLE, SCOPES, NEEDS_APPROVAL, tool_names, tool_schemas
 from tools.registry import TOOL_GROUPS
 from tools.web import is_trusted_url, trust_urls_from_text
 import memory

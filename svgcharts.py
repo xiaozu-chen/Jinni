@@ -332,7 +332,8 @@ def pie_chart(labels: Sequence[str], values: Sequence[float], title: str,
     if any(v < 0 for v in nums) or not any(v > 0 for v in nums):
         raise ValueError("a pie chart needs numbers that are zero or more, and at least one above zero")
 
-    items = sorted(((str(l), v) for l, v in zip(labels, nums) if v > 0), key=lambda item: -item[1])
+    items = sorted(((str(label_text), value) for label_text, value in zip(labels, nums) if value > 0),
+                   key=lambda item: -item[1])
     if len(items) > MAX_SERIES:
         rest = items[MAX_SERIES - 1:]
         items = items[: MAX_SERIES - 1] + [("Other", sum(v for _, v in rest))]
