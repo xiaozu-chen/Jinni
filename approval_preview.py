@@ -5,6 +5,7 @@ import logging
 
 from tools import workspace
 from tools.workspace import safe_path
+from patching import apply_exact_patches
 
 log = logging.getLogger("jinni.approval_preview")
 
@@ -20,7 +21,7 @@ def summarize_arguments(arguments: dict, limit: int = MAX_ARGUMENT_SUMMARY) -> s
 
 
 def change_preview(tool_name: str, arguments: dict) -> str | None:
-    if tool_name not in ("write_file", "edit_file"):
+    if tool_name not in ("write_file", "edit_file", "apply_patch"):
         return None
     path = arguments.get("path")
     if not isinstance(path, str):
@@ -41,7 +42,7 @@ def change_preview(tool_name: str, arguments: dict) -> str | None:
             if not isinstance(new, str):
                 return "Change preview unavailable: the new content is invalid."
             label = "overwrite" if full.exists() else "new file"
-        else:
+        elif tool_name == "edit_file":
             old_text, new_text = arguments.get("old_text"), arguments.get("new_text")
             if not isinstance(old_text, str) or not old_text or not isinstance(new_text, str):
                 return "Change preview unavailable: the edit is invalid."
@@ -50,6 +51,12 @@ def change_preview(tool_name: str, arguments: dict) -> str | None:
                 return f"Change preview unavailable: the source text matches {count} times."
             new = old.replace(old_text, new_text, 1)
             label = "edit"
+        else:
+            try:
+                new = apply_exact_patches(old, arguments.get("patches"))
+            except ValueError as error:
+                return f"Change preview unavailable: {error}."
+            label = "patch"
         diff = list(difflib.unified_diff(
             old.splitlines(keepends=True), new.splitlines(keepends=True),
             fromfile=f"before/{relative}", tofile=f"after/{relative}", n=3,
@@ -83,6 +90,10 @@ def validate_python_change(tool_name: str, arguments: dict) -> str | None:
             if existing.count(old_text) != 1:
                 return None
             source = existing.replace(old_text, new_text, 1)
+        elif tool_name == "apply_patch":
+            source = apply_exact_patches(
+                full.read_text(encoding="utf-8"), arguments.get("patches")
+            )
         else:
             return None
         if not isinstance(source, str):
@@ -90,6 +101,10 @@ def validate_python_change(tool_name: str, arguments: dict) -> str | None:
         ast.parse(source, filename=path)
     except SyntaxError as error:
         return f"Error: Python syntax error on line {error.lineno}: {error.msg}."
-    except (OSError, UnicodeError, ValueError):
+    except ValueError as error:
+        if tool_name == "apply_patch":
+            return f"Error: {error}."
+        return None
+    except (OSError, UnicodeError):
         return None
     return None

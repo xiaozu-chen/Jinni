@@ -6,8 +6,8 @@ import pytest
 from tools import NEEDS_APPROVAL, TOOL_FUNCTIONS, TOOL_SCHEMAS
 from tools import web
 from tools.basic import calculate
-from tools.files import (MAX_READ, code_outline, delete_file, edit_file, find_files, list_files,
-                         project_tree, read_file, search_files, write_file)
+from tools.files import (MAX_READ, apply_patch, code_outline, delete_file, edit_file, find_files,
+                         list_files, project_tree, read_file, search_files, write_file)
 from tools.web import check_public_url, fetch_table, fetch_url, host_scope
 from tools.provenance import read_csv_provenance
 from tools.workspace import safe_path
@@ -138,6 +138,41 @@ def test_edit_ambiguous_text_changes_nothing(workspace):
     (workspace / "a.txt").write_text("cat cat", encoding="utf-8")
     assert "2 times" in edit_file("a.txt", "cat", "dog")
     assert read_file("a.txt") == "cat cat"
+
+
+def test_apply_patch_replaces_multiple_exact_ranges(workspace):
+    (workspace / "a.txt").write_text("one\nmiddle\nthree\n", encoding="utf-8")
+
+    result = apply_patch("a.txt", [
+        {"old_text": "one", "new_text": "1"},
+        {"old_text": "three", "new_text": "3"},
+    ])
+
+    assert result == "Applied 2 patch(es) to a.txt."
+    assert read_file("a.txt") == "1\nmiddle\n3\n"
+
+
+def test_apply_patch_is_all_or_nothing(workspace):
+    (workspace / "a.txt").write_text("one middle three", encoding="utf-8")
+    patches = [
+        {"old_text": "one", "new_text": "1"},
+        {"old_text": "missing", "new_text": "2"},
+    ]
+
+    assert apply_patch("a.txt", patches).startswith("Error:")
+    assert read_file("a.txt") == "one middle three"
+
+
+def test_apply_patch_rejects_overlapping_source_ranges(workspace):
+    (workspace / "a.txt").write_text("one middle three", encoding="utf-8")
+
+    result = apply_patch("a.txt", [
+        {"old_text": "one middle", "new_text": "first"},
+        {"old_text": "middle", "new_text": "second"},
+    ])
+
+    assert "overlap" in result
+    assert read_file("a.txt") == "one middle three"
 
 
 def test_edit_empty_old_text(workspace):

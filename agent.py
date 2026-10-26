@@ -51,11 +51,13 @@ def authorize(
         scope = SCOPES[call.name](args) if call.name in SCOPES else "*"
         key = (call.name, scope)
         auto_approved = key in allowed
-        if call.name in ("write_file", "edit_file"):
+        if call.name in ("write_file", "edit_file", "apply_patch"):
             syntax_error = validate_python_change(call.name, args)
             if syntax_error:
                 return None, syntax_error
             preview = change_preview(call.name, args)
+            if call.name == "apply_patch" and preview and preview.startswith("Change preview unavailable:"):
+                return None, preview
             if preview:
                 print("  proposed change:\n" + preview)
         if not auto_approved:

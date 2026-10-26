@@ -101,6 +101,19 @@ def test_invalid_python_write_is_rejected_before_approval(workspace, monkeypatch
     assert not (workspace / "broken.py").exists()
 
 
+def test_invalid_python_patch_is_rejected_before_approval(workspace, monkeypatch):
+    (workspace / "module.py").write_text("def answer():\n    return 42\n", encoding="utf-8")
+    monkeypatch.setattr("builtins.input", lambda _: pytest.fail("invalid Python must not prompt"))
+    args, message = authorize(make_call("apply_patch", {
+        "path": "module.py",
+        "patches": [{"old_text": "return 42", "new_text": "return )"}],
+    }))
+
+    assert args is None
+    assert "syntax error" in message
+    assert (workspace / "module.py").read_text(encoding="utf-8") == "def answer():\n    return 42\n"
+
+
 def test_remembered_approval_is_marked_auto(monkeypatch):
     trust_urls_from_text("https://example.com/one https://example.com/two")
     monkeypatch.setattr("builtins.input", lambda _: "a")

@@ -53,12 +53,15 @@ def test_approval_flag_is_recorded(clean_registry):
 
 def test_real_tools_are_discovered():
     expected = {"get_current_time", "calculate", "list_files", "read_file",
-                "write_file", "edit_file", "fetch_url", "fetch_table"}
+                "write_file", "edit_file", "apply_patch", "fetch_url", "fetch_table"}
     assert expected <= set(tools.TOOL_FUNCTIONS)
+    schema = next(item["function"]["parameters"] for item in tools.TOOL_SCHEMAS
+                  if item["function"]["name"] == "apply_patch")
+    assert schema["properties"]["patches"]["type"] == "array"
 
 
 def test_dangerous_tools_require_approval():
-    assert {"write_file", "edit_file", "fetch_url", "fetch_table"} <= tools.NEEDS_APPROVAL
+    assert {"write_file", "edit_file", "apply_patch", "fetch_url", "fetch_table"} <= tools.NEEDS_APPROVAL
 
 
 def test_broken_plugin_is_skipped_not_fatal(monkeypatch):

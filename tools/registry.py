@@ -42,7 +42,7 @@ def remove_tool(name: str) -> None:
 
 
 def tool(description: str, 
-         params: dict[str, str] | None = None, 
+             params: dict[str, Any] | None = None,
          approval: bool = False, 
          remember: bool = False, 
          scope: ScopeFn | None = None):
@@ -60,10 +60,14 @@ def tool(description: str,
         for pname, p in inspect.signature(fn).parameters.items():
             if pname not in params:
                 raise ValueError(f"tool '{name}': parameter '{pname}' needs a description")
-            properties[pname] = {
-                "type": JSON_TYPES.get(p.annotation, "string"),
-                "description": params[pname],
-            }
+            parameter_spec = params[pname]
+            if isinstance(parameter_spec, dict):
+                properties[pname] = parameter_spec
+            else:
+                properties[pname] = {
+                    "type": JSON_TYPES.get(p.annotation, "string"),
+                    "description": parameter_spec,
+                }
             if p.default is inspect.Parameter.empty:
                 required.append(pname)
         schema: dict[str, Any] = {"type": "object", "properties": properties}

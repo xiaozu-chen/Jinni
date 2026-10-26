@@ -14,4 +14,5 @@ def auto_commit(commit_message: str = "Automated update from Codex") -> int:
 
 
 if __name__ == "__main__":
-  sys.exit(auto_commit("Update files with recent changes"))
+  message = " ".join(sys.argv[1:]).strip() or "Automated update from Codex"
+  sys.exit(auto_commit(message))

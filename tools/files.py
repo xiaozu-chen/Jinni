@@ -4,11 +4,14 @@ import logging
 import os
 import re
 import shutil
+import tempfile
+import ast
 from pathlib import Path
 
 from .registry import tool
 from . import workspace as workspace_tools
 from .provenance import write_typed_csv_provenance
+from patching import apply_exact_patches
 from .workspace import mark_written, safe_path
 
 MAX_READ = 4000
@@ -21,6 +24,7 @@ MAX_SEARCH_HITS = 50
 MAX_PATTERN_CHARS = 256
 MAX_DEPTH = 10
 MAX_OUTPUT_CHARS = 12000
+MAX_PATCH_FILE_BYTES = 1_000_000
 SKIP_DIRS = {".git", ".venv", "venv", "__pycache__", "node_modules", ".pytest_cache", ".trash", ".jinni"}
 log = logging.getLogger("jinni.tools.files")
 
@@ -363,6 +367,64 @@ def edit_file(path: str, old_text: str, new_text: str) -> str:
     except (OSError, UnicodeError, ValueError) as e:
         log.warning("edit_file could not edit %s: %s", path, e)
         return f"Error: {e}"
+
+
+@tool(
+    description="Apply several exact replacements to one existing file as a single validated change. Every old_text must match exactly once, and no file is written unless all patches pass validation.",
+    params={
+        "path": "Existing file path relative to the workspace.",
+        "patches": {
+            "type": "array",
+            "description": "One to 20 non-overlapping replacements.",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "old_text": {"type": "string", "description": "Exact source text to find once."},
+                    "new_text": {"type": "string", "description": "Replacement text."},
+                },
+                "required": ["old_text", "new_text"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    approval=True,
+)
+def apply_patch(path: str, patches: list[dict[str, str]]) -> str:
+    try:
+        full = safe_path(path)
+        if not full.is_file():
+            return f"Error: '{path}' was not found as a file in the workspace."
+        if full.stat().st_size > MAX_PATCH_FILE_BYTES:
+            return f"Error: files larger than {MAX_PATCH_FILE_BYTES // 1000} KB cannot be patched."
+        original = full.read_text(encoding="utf-8")
+        updated = apply_exact_patches(original, patches)
+        if full.suffix.lower() == ".py":
+            ast.parse(updated, filename=str(full))
+        if updated == original:
+            return f"No changes needed in {path}."
+
+        temporary = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                mode="w", encoding="utf-8", newline="", dir=full.parent,
+                prefix=f".{full.name}.", suffix=".patch", delete=False,
+            ) as stream:
+                temporary = Path(stream.name)
+                stream.write(updated)
+            os.replace(temporary, full)
+        finally:
+            if temporary is not None and temporary.exists():
+                temporary.unlink()
+        mark_written(full)
+        marker_note = _mark_typed_csv(full)
+        return f"Applied {len(patches)} patch(es) to {path}.{marker_note}"
+    except SyntaxError as error:
+        return f"Error: Python syntax error on line {error.lineno}: {error.msg}."
+    except FileNotFoundError:
+        return f"Error: '{path}' was not found in the workspace."
+    except (OSError, UnicodeError, ValueError) as error:
+        log.warning("apply_patch could not patch %s: %s", path, error)
+        return f"Error: {error}"
 
 
 @tool(
