@@ -4,7 +4,7 @@ import inspect
 from collections.abc import Callable
 from typing import Any
 
-TOOL_FUNCTIONS: dict[str, Callable[..., str]] = {}
+TOOL_FUNCTIONS: dict[str, Callable[..., Any]] = {}
 TOOL_SCHEMAS: list[dict[str, Any]] = []
 NEEDS_APPROVAL: set[str] = set()
 REMEMBERABLE: set[str] = set()

@@ -25,7 +25,9 @@ def test_memory_provenance_survives_reopening_database(tmp_path):
     second_session = memory.MemoryStore(path)
 
     assert second_session.session_id != first_session.session_id
-    assert second_session.get(saved.id).session_id == first_session.session_id
+    loaded = second_session.get(saved.id)
+    assert loaded is not None
+    assert loaded.session_id == first_session.session_id
 
 
 def test_existing_memory_database_gets_provenance_column(tmp_path):
@@ -40,7 +42,9 @@ def test_existing_memory_database_gets_provenance_column(tmp_path):
 
     store = memory.MemoryStore(path)
 
-    assert store.get(1).session_id == ""
+    loaded = store.get(1)
+    assert loaded is not None
+    assert loaded.session_id == ""
     assert store.add("fact", "new fact").session_id == store.session_id
 
 

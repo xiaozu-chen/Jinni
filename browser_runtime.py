@@ -33,7 +33,7 @@ def run_browser_command(command: list[str], timeout: float) -> subprocess.Comple
                 pass
         else:
             try:
-                os.killpg(process.pid, signal.SIGKILL)
+                getattr(os, "killpg")(process.pid, signal.SIGKILL)
             except ProcessLookupError:
                 pass
         try:

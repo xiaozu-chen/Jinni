@@ -96,10 +96,14 @@ async def _case(symbol: str, expected_file: str, delegated: bool) -> Score:
                 content = ""
             elapsed = time.perf_counter() - started
             metrics = LAST_RUN_METRICS if delegated else {}
-            child_tokens = int(metrics.get("total_tokens", 0)) if delegated else 0
-            verified = int(metrics.get("verified", 0)) if delegated else 0
-            dropped = int(metrics.get("dropped", 0)) if delegated else 0
-            await agent.client.close()
+            child_tokens = metrics.total_tokens if delegated else 0
+            verified = metrics.verified if delegated else 0
+            dropped = metrics.dropped if delegated else 0
+            try:
+                await agent.client.close()
+            finally:
+                if agent._owns_memory:
+                    agent.memory.conn.close()
             return Score(
                 symbol, delegated, expected_file.casefold() in content.casefold(), peak,
                 agent.stats["prompt_tokens"] + agent.stats["completion_tokens"] + child_tokens,

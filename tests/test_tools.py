@@ -297,6 +297,7 @@ def test_fetch_table_saves_csv_and_hash_provenance(workspace, monkeypatch):
     assert "Saved table 0" in result
     assert csv_path.read_text(encoding="utf-8") == "Month,Sales\nJan,10\nFeb,15\n"
     record = read_csv_provenance(csv_path)
+    assert record is not None
     assert record["source_url"] == "https://example.com/reports/sales"
     assert record["fetched_at"].startswith("20")
     assert len(record["sha256"]) == 64
@@ -403,8 +404,10 @@ def test_same_site_redirect_is_followed(monkeypatch):
     assert calls == ["https://good.example/page", "https://www.good.example/page"]
 
 
-def _web_client(responses, calls=None):
-    calls = [] if calls is None else calls
+def _web_client(
+    responses: list[httpx.Response], calls: list[str] | None = None,
+) -> type:
+    calls: list[str] = [] if calls is None else calls
 
     class Client:
         def __init__(self, **kwargs):
@@ -416,7 +419,7 @@ def _web_client(responses, calls=None):
         def __exit__(self, *args):
             return False
 
-        def stream(self, method, url, **kwargs):
+        def stream(self, method: str, url: str, **kwargs):
             calls.append(url)
             response = responses.pop(0)
 

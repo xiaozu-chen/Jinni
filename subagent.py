@@ -9,6 +9,7 @@ import re
 import secrets
 import time
 import weakref
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from config import settings
@@ -19,7 +20,20 @@ from tools.workspace import safe_path
 log = logging.getLogger("jinni.subagent")
 _WARNED_UNSAFE: set[str] = set()
 SUBAGENT_DEPTH: contextvars.ContextVar[int] = contextvars.ContextVar("subagent_depth", default=0)
-LAST_RUN_METRICS: dict[str, object] = {}
+
+
+@dataclass
+class SubagentMetrics:
+    laps: int = 0
+    prompt_tokens: int = 0
+    total_tokens: int = 0
+    tools: list[str] = field(default_factory=list)
+    pointers: int = 0
+    verified: int = 0
+    dropped: int = 0
+
+
+LAST_RUN_METRICS = SubagentMetrics()
 _locks: weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, asyncio.Lock] = weakref.WeakKeyDictionary()
 _ANSI = re.compile(r"\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07]*(?:\x07|\x1b\\))")
 _CONTROLS = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
@@ -162,14 +176,11 @@ async def _run(task: str) -> tuple[str, int, int, int]:
     child.stats["laps"] = 0
 
     def finish(result: str, pointers: int = 0):
-        metrics = LAST_RUN_METRICS
-        metrics.update({
-            "laps": child.stats["laps"],
-            "prompt_tokens": child.stats["prompt_tokens"],
-            "total_tokens": child.stats["prompt_tokens"] + child.stats["completion_tokens"],
-            "tools": sorted(child.tool_counts),
-            "pointers": pointers,
-        })
+        LAST_RUN_METRICS.laps = child.stats["laps"]
+        LAST_RUN_METRICS.prompt_tokens = child.stats["prompt_tokens"]
+        LAST_RUN_METRICS.total_tokens = child.stats["prompt_tokens"] + child.stats["completion_tokens"]
+        LAST_RUN_METRICS.tools = sorted(child.tool_counts)
+        LAST_RUN_METRICS.pointers = pointers
         return result, child.stats["laps"], child.stats["prompt_tokens"] + child.stats["completion_tokens"], pointers
 
     try:
@@ -196,7 +207,11 @@ async def _run(task: str) -> tuple[str, int, int, int]:
                 child.messages.append({"role": "tool", "tool_call_id": call.id, "content": result})
         return finish(ERROR_LAPS)
     finally:
-        await child.client.close()
+        try:
+            await child.client.close()
+        finally:
+            if child._owns_memory:
+                child.memory.conn.close()
 
 
 async def run_subagent(task: str) -> str:
@@ -207,7 +222,13 @@ async def run_subagent(task: str) -> str:
         return ERROR_EMPTY
     started = time.perf_counter()
     run_id = secrets.token_hex(2)
-    LAST_RUN_METRICS.clear()
+    LAST_RUN_METRICS.laps = 0
+    LAST_RUN_METRICS.prompt_tokens = 0
+    LAST_RUN_METRICS.total_tokens = 0
+    LAST_RUN_METRICS.tools.clear()
+    LAST_RUN_METRICS.pointers = 0
+    LAST_RUN_METRICS.verified = 0
+    LAST_RUN_METRICS.dropped = 0
     lock = _loop_lock()
     acquired = False
     token = SUBAGENT_DEPTH.set(1)
@@ -217,14 +238,16 @@ async def run_subagent(task: str) -> str:
             acquired = True
             result, laps, tokens, pointers = await _run(clean_task)
         outcome = "error" if result.startswith("Error:") else "ok"
-        metrics = LAST_RUN_METRICS
         pointer_counts = re.search(r"pointers: (\d+) verified, (\d+) dropped", result)
         verified = int(pointer_counts.group(1)) if pointer_counts else 0
         dropped = int(pointer_counts.group(2)) if pointer_counts else 0
-        metrics.update({"laps": laps, "total_tokens": tokens, "verified": verified, "dropped": dropped})
+        LAST_RUN_METRICS.laps = laps
+        LAST_RUN_METRICS.total_tokens = tokens
+        LAST_RUN_METRICS.verified = verified
+        LAST_RUN_METRICS.dropped = dropped
         log.info(
             "subagent %s task=%r laps=%d tokens=%d tools=%s verified=%d dropped=%d outcome=%s",
-            run_id, clean_task[:200], laps, tokens, ",".join(metrics.get("tools", [])),
+            run_id, clean_task[:200], laps, tokens, ",".join(LAST_RUN_METRICS.tools),
             verified, dropped, outcome,
         )
         print(f"  [subagent {run_id}] {laps} laps, {tokens} tokens, "

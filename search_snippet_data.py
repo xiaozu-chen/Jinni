@@ -88,7 +88,8 @@ def extract_points(results: list[dict[str, Any]], query: str) -> list[SearchPoin
                 continue
             values.append((value, unit))
         if len(values) == 1:
-            points.append(SearchPoint(title or query[:80], *values[0], title, url, snippet))
+            value, unit = values[0]
+            points.append(SearchPoint(title or query[:80], value, unit, title, url, snippet))
         if len(points) >= MAX_POINTS:
             return points
     return points

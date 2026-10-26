@@ -246,6 +246,7 @@ def test_sampling_sends_server_messages_as_untrusted_user_content(monkeypatch):
     response = asyncio.run(server._sampling_callback(None, params))
 
     assert isinstance(response, mcp_types.CreateMessageResult)
+    assert isinstance(response.content, mcp_types.TextContent)
     assert response.content.text == "summary"
     assert captured["max_tokens"] == 512
     assert [message["role"] for message in captured["messages"]] == ["system", "user"]

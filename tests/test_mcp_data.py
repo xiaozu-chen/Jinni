@@ -74,6 +74,7 @@ def test_export_mcp_table_saves_hash_checked_provenance_and_charts_it(workspace)
     assert "Saved MCP table" in message
     csv_path = next(workspace.glob("fixture-get_table-sales-*.csv"))
     record = read_csv_provenance(csv_path)
+    assert record is not None
     assert record["source_url"].startswith("mcp://fixture/get_table?")
     assert make_chart(csv_path.name, "month", "revenue").startswith("Saved")
     chart = next((workspace / "charts").glob("*.html"))

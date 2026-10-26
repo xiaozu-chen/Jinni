@@ -39,6 +39,7 @@ def test_bad_json_does_not_crash():
 def test_wrong_argument_names_do_not_crash():
     call = make_call("read_file", {"wrong": 1})
     args, _ = authorize(call)
+    assert args is not None
     result = asyncio.run(execute(call, args))
     assert result.startswith("Error")
 
@@ -56,6 +57,7 @@ def test_approved_write_works(workspace, monkeypatch):
     monkeypatch.setattr("builtins.input", lambda _: "y")
     call = make_call("write_file", {"path": "a.txt", "content": "x"})
     args, _ = authorize(call)
+    assert args is not None
     asyncio.run(execute(call, args))
 
     assert (workspace / "a.txt").read_text(encoding="utf-8") == "x"
@@ -67,6 +69,7 @@ def test_approved_write_shows_bounded_diff_and_redacts_audit(workspace, monkeypa
 
     events = []
     args, _ = authorize(call, emit=events.append)
+    assert args is not None
     asyncio.run(execute(call, args))
 
     prompt = "\n".join(event.text for event in events)
@@ -246,7 +249,7 @@ def test_always_allow_is_asked_only_once(ping_tool, monkeypatch):
 
 def test_always_is_refused_for_dangerous_tools(workspace, monkeypatch):
     monkeypatch.setattr("builtins.input", lambda _: "a")
-    allowed: set[str] = set()
+    allowed: set[tuple[str, str]] = set()
 
     args, _ = authorize(make_call("write_file", {"path": "a.txt", "content": "x"}), allowed)
 
@@ -379,6 +382,7 @@ def test_async_tools_are_awaited(monkeypatch):
     monkeypatch.setitem(TOOL_FUNCTIONS, "greet", greet)
     call = make_call("greet", {"name": "Carl"})
     args, _ = authorize(call)
+    assert args is not None
     assert asyncio.run(execute(call, args)) == "hi Carl"
 
 

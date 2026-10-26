@@ -1,6 +1,7 @@
 import asyncio
 import sys
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -16,8 +17,8 @@ CHART_SERVER = str(Path(__file__).parent / "fixtures" / "chart_data_server.py")
 
 
 def config(**overrides):
-    fields = dict(name="t", command=sys.executable, args=(SERVER,),
-                  tools=("echo", "slow", "crash"), call_timeout=10.0)
+    fields: dict[str, Any] = dict(name="t", command=sys.executable, args=(SERVER,),
+                                  tools=("echo", "slow", "crash"), call_timeout=10.0)
     fields.update(overrides)
     return McpServerConfig(**fields)
 

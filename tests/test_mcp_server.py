@@ -1,13 +1,16 @@
+from collections.abc import Callable
+from typing import Any
+
 from mcp_server import build_server
 
 
 class FakeMCPServer:
     def __init__(self, name):
         self.name = name
-        self.tools = {}
+        self.tools: dict[str, Callable[..., Any]] = {}
 
     def tool(self):
-        def register(function):
+        def register(function: Callable[..., Any]) -> Callable[..., Any]:
             self.tools[function.__name__] = function
             return function
 

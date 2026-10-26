@@ -1,5 +1,6 @@
 import asyncio
 import json as jsonlib
+from typing import Any, cast
 
 import pytest
 
@@ -83,7 +84,7 @@ def test_run_case_applies_model_tool_calls_and_scores_in_scratch():
                 }]})
             return Response({"content": "done"})
 
-    result = asyncio.run(run_case(Client(), case, model="fixture", thinking=False, menu_size=3))
+    result = asyncio.run(run_case(cast(Any, Client()), case, model="fixture", thinking=False, menu_size=3))
 
     assert result.passed
     assert result.detail == "all source checks passed"
