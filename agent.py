@@ -16,6 +16,7 @@ from config import settings
 from context import compact, to_transcript
 from models import Message, ToolCall
 from retry import with_retries
+from thinking_classifier import THINKING_CLASSIFIER_PROMPT, parse_thinking_label
 from tools import TOOL_FUNCTIONS, REMEMBERABLE, SCOPES, NEEDS_APPROVAL, tool_names, tool_schemas
 from tools.registry import TOOL_GROUPS
 from tools.web import is_trusted_url, trust_urls_from_text
@@ -208,23 +209,16 @@ class Agent:
             response = await self.thinking_classifier.chat.completions.create(
                 model=settings.thinking_classifier_model,
                 messages=[
-                    {
-                        "role": "system",
-                        "content": (
-                            "Classify whether the request needs extended reasoning. "
-                            "Reply with exactly 'on' for multi-step, ambiguous, analytical, "
-                            "or code-related work; otherwise reply with exactly 'off'."
-                        ),
-                    },
+                    {"role": "system", "content": THINKING_CLASSIFIER_PROMPT},
                     {"role": "user", "content": user_text[:4000]},
                 ],
                 temperature=0,
                 max_tokens=4,
             )
-            label = response.choices[0].message.content
-            if not isinstance(label, str) or label.strip().lower() not in {"on", "off"}:
+            selected = parse_thinking_label(response.choices[0].message.content)
+            if selected is None:
                 raise ValueError("classifier returned an invalid label")
-            self.thinking_on = label.strip().lower() == "on"
+            self.thinking_on = selected
             log.info("thinking classifier selected %s", "on" if self.thinking_on else "off")
         except Exception as error:
             self.thinking_on = settings.thinking_default
