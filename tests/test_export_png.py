@@ -4,9 +4,9 @@ from pathlib import Path
 
 import pytest
 
-import export_png
-import svgcharts
-from export_png import (
+import presentation.export_png as export_png
+import presentation.svgcharts as svgcharts
+from presentation.export_png import (
     ExportError, build_command, export_chart, find_browser, parse_export_options, png_size, render_png,
 )
 from tools.charts import make_chart

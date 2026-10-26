@@ -5,8 +5,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from config import McpServerConfig
-from mcp_client import (McpServer, build_parameters, find_command, format_result, plain,
+from settings.config import McpServerConfig
+from server.mcp_client import (McpServer, build_parameters, find_command, format_result, plain,
                         register_server_tools, shrink_schema, tool_name, validate_arguments)
 from tools import registry
 
@@ -360,7 +360,7 @@ def test_raw_server_call_validates_arguments_and_forwards_valid_calls():
 
 
 def test_manager_shutdown_cancels_pending_automatic_restarts(clean_registry):
-    from mcp_client import McpManager
+    from server.mcp_client import McpManager
 
     async def scenario():
         manager = McpManager((McpServerConfig(name="fixture", command="fixture"),),

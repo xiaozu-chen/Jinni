@@ -2,7 +2,7 @@ import logging
 import pkgutil
 from importlib import import_module
 
-from config import settings as _settings
+from settings.config import settings as _settings
 
 from .registry import (
     NEEDS_APPROVAL, REMEMBERABLE, SCOPES, SUBAGENT_SAFE, TOOL_FUNCTIONS, TOOL_GROUPS, TOOL_SCHEMAS,
@@ -29,6 +29,6 @@ def load_plugins() -> list[str]:
 LOAD_ERRORS = load_plugins()
 
 if _settings.subagents_enabled:
-    from subagent import effective_tool_menu
+    from runtime.subagent import effective_tool_menu
 
     effective_tool_menu()

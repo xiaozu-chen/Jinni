@@ -40,7 +40,7 @@ From the repository root:
 jinni
 ```
 
-Or run `python jinni.py`. Type `exit` to leave. `/help` lists the CLI commands. Use `/project PATH` to work on a managed copy of a repository; without a selected project, Jinni uses its regular `workspace` folder.
+Or run `python -m interface.cli.jinni`. Type `exit` to leave. `/help` lists the CLI commands. Use `/project PATH` to work on a managed copy of a repository; without a selected project, Jinni uses its regular `workspace` folder.
 
 See [the command reference](docs/COMMANDS.md) for every slash command and common project command.
 
@@ -61,7 +61,7 @@ pyright
 For the local subagent A/B evaluation, make sure the chat server is running and run:
 
 ```powershell
-python subagent_eval.py
+python -m bench.subagent_eval
 ```
 
 This compares the same research tasks with delegation off and on. It does not change the normal `subagents_enabled` setting.
@@ -69,6 +69,6 @@ This compares the same research tasks with delegation off and on. It does not ch
 ## Repository notes
 
 - `docs/IDEAS.md` is the roadmap; `docs/SUBAGENTS.md` records the subagent design and acceptance checks.
-- `tools/` contains registered model tools. The application modules remain at the repository root because the package configuration installs them as top-level Python modules.
+- Application modules are grouped into responsibility folders such as `runtime/`, `memory/`, `server/`, and `presentation/`. `interface/cli/` contains the command-line entry point, while `tools/` contains registered model tools.
 - `tests/fixtures/` contains local MCP servers used by integration tests.
 - `workspace/`, `settings.toml`, memory databases, logs, and local replays are runtime data and are ignored by Git.

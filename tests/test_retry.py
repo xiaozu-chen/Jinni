@@ -2,8 +2,8 @@ import asyncio
 
 import pytest
 
-import retry
-from retry import with_retries
+import runtime.retry as retry
+from runtime.retry import with_retries
 
 
 @pytest.fixture

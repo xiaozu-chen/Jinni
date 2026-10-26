@@ -5,11 +5,11 @@ from dataclasses import replace
 
 import pytest
 
-from agent import Agent, execute
-from agent_events import AgentEvent
-from config import load_settings, settings
-from models import ToolCall
-import subagent
+from runtime.agent import Agent, execute
+from runtime.agent_events import AgentEvent
+from settings.config import load_settings, settings
+from context.models import ToolCall
+import runtime.subagent as subagent
 from tools import NEEDS_APPROVAL, SUBAGENT_SAFE
 from tools import registry
 
@@ -71,7 +71,7 @@ def test_runtime_rejects_out_of_menu_tools(monkeypatch):
     async def forbidden(*_args):
         pytest.fail("an unlisted tool must never execute")
 
-    monkeypatch.setattr("agent.execute", forbidden)
+    monkeypatch.setattr("runtime.agent.execute", forbidden)
     agent = Agent(project_active=True, tool_menu={"read_file"}, quiet=True)
     result = asyncio.run(agent.run_tools([ToolCall("1", "write_file", '{"path":"x","content":"bad"}')]))
     assert "not available to a subagent" in result[0]
@@ -160,7 +160,7 @@ def test_subrun_starts_with_fresh_context_and_skips_memory(monkeypatch, capsys):
         return "FOUND: none\nSUMMARY: Fresh lookup complete.", [], 4
 
     monkeypatch.setattr(Agent, "stream_response", scripted)
-    monkeypatch.setattr("memory.get_store", lambda: pytest.fail("subagent must not open the memory store"))
+    monkeypatch.setattr("memory.memory.get_store", lambda: pytest.fail("subagent must not open the memory store"))
     result = asyncio.run(subagent.run_subagent("  find one thing  "))
     messages, no_memory, menu, thinking = seen[0]
     assert [message["role"] for message in messages] == ["system", "user"]
@@ -243,8 +243,8 @@ def test_subrun_does_not_touch_memory_or_review_paths(monkeypatch, memory_store)
     for name in ("remember", "recall", "forget"):
         monkeypatch.setitem(registry.TOOL_FUNCTIONS, name, forbidden(name))
     monkeypatch.setattr(Agent, "propose_memories", forbidden("propose_memories"))
-    monkeypatch.setattr("memory.get_store", forbidden("memory.get_store"))
-    import review
+    monkeypatch.setattr("memory.memory.get_store", forbidden("memory.memory.get_store"))
+    import runtime.review as review
     monkeypatch.setattr(review, "review", forbidden("review"))
     monkeypatch.setattr(review, "review_stale_facts", forbidden("review_stale_facts"))
 
@@ -436,7 +436,7 @@ def test_task_is_trimmed_and_capped(monkeypatch):
 
 
 def test_eval_report_includes_ab_measurements():
-    from subagent_eval import Score, render
+    from bench.subagent_eval import Score, render
 
     report = render([Score("sample", True, True, 123, 456, 1.2, 2, 1)])
     assert "peak context" in report

@@ -8,8 +8,8 @@ import time
 
 from openai import AsyncOpenAI
 
-from config import settings
-from thinking_classifier import (
+from settings.config import settings
+from runtime.thinking_classifier import (
     THINKING_CLASSIFIER_PROMPT, THINKING_CLASSIFIER_SCHEMA, parse_thinking_label,
 )
 

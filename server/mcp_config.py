@@ -5,7 +5,7 @@ import math
 import re
 from pathlib import Path
 
-from config import McpServerConfig
+from settings.config import McpServerConfig
 
 MAX_CONFIG_BYTES = 100_000
 NAME_PATTERN = re.compile(r"^[A-Za-z0-9_-]{1,64}$")

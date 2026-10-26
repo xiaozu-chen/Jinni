@@ -1,5 +1,5 @@
-import export_all
-from export_png import ExportError
+import presentation.export_all as export_all
+from presentation.export_png import ExportError
 
 
 def test_export_all_runs_each_format_for_every_chart(workspace, monkeypatch):

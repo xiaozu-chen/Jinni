@@ -1,7 +1,7 @@
 from collections import Counter
 
-from bench_classifier import PROMPTS
-from thinking_classifier import parse_thinking_label
+from bench.bench_classifier import PROMPTS
+from runtime.thinking_classifier import parse_thinking_label
 
 
 def test_classifier_benchmark_has_30_balanced_cases():

@@ -2,9 +2,9 @@ from dataclasses import replace
 
 import httpx
 
-import embedding_server as server_module
-from config import settings
-from embedding_server import EmbeddingServer
+import server.embedding_server as server_module
+from settings.config import settings
+from server.embedding_server import EmbeddingServer
 
 
 class Process:

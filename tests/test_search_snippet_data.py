@@ -1,7 +1,7 @@
 import csv
 import io
 
-from search_snippet_data import extract_points, points_csv
+from presentation.search_snippet_data import extract_points, points_csv
 
 
 def test_extracts_explicit_label_value_pairs_and_normalizes_units():

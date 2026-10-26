@@ -10,7 +10,7 @@ from typing import Any
 
 import httpx
 
-from config import settings
+from settings.config import settings
 
 MAX_CASE_BYTES = 2_000_000
 

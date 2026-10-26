@@ -2,7 +2,7 @@ import asyncio
 import httpx
 import pytest
 
-from eval_harness import EvalCase, load_cases, parse_menu_sizes, run_variant
+from bench.eval_harness import EvalCase, load_cases, parse_menu_sizes, run_variant
 
 
 def test_load_cases_checks_the_case_shape(tmp_path):

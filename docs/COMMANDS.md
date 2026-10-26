@@ -111,9 +111,9 @@ Run these in PowerShell from the repository root unless noted.
 | `llama-server -m C:\models\YOUR_MODEL.gguf -c 16384 --jinja --host 127.0.0.1 --port 8080 -ngl 99` | Starts the local OpenAI-compatible chat server. Replace the model path and GPU layer count for your machine. | Provide the model endpoint Jinni talks to. |
 | `llama-server -m C:\models\nomic-embed-text-v1.5.Q8_0.gguf --embedding --pooling mean -c 2048 -ub 2048 -np 1 -ngl 0 --host 127.0.0.1 --port 8081` | Starts the optional embedding server. | Enable semantic memory search. |
 | `jinni` | Starts the installed CLI. | Normal interactive use. |
-| `python jinni.py` | Starts the CLI from the source checkout. | Run without installing the console entry point. |
+| `python -m interface.cli.jinni` | Starts the CLI from the source checkout. | Run without installing the console entry point. |
 | `jinni --project PATH` | Copies a repository into Jinni’s managed project area and starts with it active. | Safely work on a copy of an existing repository. |
-| `python jinni.py --project PATH` | Same as `jinni --project PATH`, but runs directly from the source checkout. | Start a managed project without installing the console command. |
+| `python -m interface.cli.jinni --project PATH` | Same as `jinni --project PATH`, but runs directly from the source checkout. | Start a managed project without installing the console command. |
 
 ## Test, evaluation, and maintenance commands
 
@@ -122,12 +122,12 @@ Run these in PowerShell from the repository root unless noted.
 | `python -m pytest` | Runs the test suite. | Verify behavior after changes. |
 | `ruff check .` | Runs Ruff lint checks. | Catch common style and correctness issues. |
 | `pyright` | Runs the configured Pyright type check. | Find incompatible or unsafe types before runtime. |
-| `python -m eval_harness` | Runs the tool-selection evaluation against the configured local chat server. | Compare model/tool-menu settings against expected tool choices. |
-| `python coding_eval.py --models qwen3.5 --thinking off,on --tool-counts 3,all` | Runs five bounded scratch-project coding tasks with file tools and static scoring. | Compare coding behavior without executing model-generated code. |
-| `python subagent_eval.py` | Runs the same three research tasks with delegation off and on. | Measure pass rate, context, tokens, time, and pointer verification before enabling subagents by default. |
-| `python bench_embed.py` | Compares related and unrelated memory-embedding similarity scores. | Calibrate `min_similarity` against the configured embedding model. |
-| `python bench_search.py` | Queries a fixed phrase against several public search backends and prints result counts and elapsed time. | Compare configured search-provider availability and response speed; this makes live network requests. |
-| `python mcp_server.py` | Starts Jinni’s read-only MCP server over stdio. | Expose the fixed `list_files`, `read_file`, and `recall` tools to an MCP host. |
+| `python -m bench.eval_harness` | Runs the tool-selection evaluation against the configured local chat server. | Compare model/tool-menu settings against expected tool choices. |
+| `python -m bench.coding_eval --models qwen3.5 --thinking off,on --tool-counts 3,all` | Runs five bounded scratch-project coding tasks with file tools and static scoring. | Compare coding behavior without executing model-generated code. |
+| `python -m bench.subagent_eval` | Runs the same three research tasks with delegation off and on. | Measure pass rate, context, tokens, time, and pointer verification before enabling subagents by default. |
+| `python -m bench.bench_embed` | Compares related and unrelated memory-embedding similarity scores. | Calibrate `min_similarity` against the configured embedding model. |
+| `python -m bench.bench_search` | Queries a fixed phrase against several public search backends and prints result counts and elapsed time. | Compare configured search-provider availability and response speed; this makes live network requests. |
+| `python -m server.mcp_server` | Starts Jinni’s read-only MCP server over stdio. | Expose the fixed `list_files`, `read_file`, and `recall` tools to an MCP host. |
 | `pre-commit install` | Installs the repository’s Git pre-commit hooks. | Run configured checks automatically before commits. |
 | `python commit_script.py "MESSAGE"` | Stages all current changes with `git add -A` and commits them using the supplied message. | Use the project’s helper only after checking that every staged change belongs in the commit. |
 

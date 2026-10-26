@@ -13,9 +13,9 @@ from typing import Any
 
 import httpx
 
-from config import settings
+from settings.config import settings
 
-DEFAULT_CASES = Path(__file__).with_name("coding_eval_cases.json")
+DEFAULT_CASES = Path(__file__).resolve().parents[1] / "coding_eval_cases.json"
 MAX_FILE_BYTES = 100_000
 MAX_TOOL_CALLS = 20
 

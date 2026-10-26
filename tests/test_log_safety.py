@@ -1,7 +1,7 @@
 import logging
 import sys
 
-from log_safety import SecretScrubber, scrub_secrets
+from runtime.log_safety import SecretScrubber, scrub_secrets
 
 
 def test_scrubs_common_secret_shapes():

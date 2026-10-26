@@ -3,7 +3,7 @@ import tempfile
 
 import pytest
 
-from project import (
+from runtime.project import (
     checkpoint_before_write, copy_project, create_project, list_projects,
     load_project_guidance, select_project, undo_last_checkpoint,
 )
@@ -105,7 +105,7 @@ def test_project_guidance_is_loaded_and_size_limited(tmp_path):
 
 
 def test_agent_context_appends_project_guidance(memory_store):
-    from agent import Agent
+    from runtime.agent import Agent
 
     agent = Agent(project_guidance="Use the project's existing formatter.")
 

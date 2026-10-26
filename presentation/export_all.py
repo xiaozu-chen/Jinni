@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-import export_formats
-import export_png
-from export_png import ExportError
+import presentation.export_formats as export_formats
+import presentation.export_png as export_png
+from presentation.export_png import ExportError
 from tools.workspace import CHART_DIR, WORKSPACE
 
 def _exporters():

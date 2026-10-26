@@ -10,7 +10,7 @@ from pathlib import Path
 
 import numpy as np
 
-from semantic import EmbedError, embed_texts, embedding_prefixes
+from memory.semantic import EmbedError, embed_texts, embedding_prefixes
 
 log = logging.getLogger("jinni.workspace_search")
 

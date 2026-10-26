@@ -9,8 +9,8 @@ import re
 import zipfile
 import xml.etree.ElementTree as ET
 
-import svgcharts
-from chart_records import record_genuine_chart
+import presentation.svgcharts as svgcharts
+from presentation.chart_records import record_genuine_chart
 
 from .registry import tool
 from .provenance import read_csv_provenance

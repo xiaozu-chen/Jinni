@@ -1,7 +1,7 @@
 import json
 from types import SimpleNamespace
 
-from transcripts import load_transcript, save_transcript
+from memory.transcripts import load_transcript, save_transcript
 
 
 def test_save_and_load_transcript_round_trip(workspace):

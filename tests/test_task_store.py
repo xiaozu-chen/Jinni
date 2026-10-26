@@ -2,7 +2,7 @@ from datetime import date, timedelta
 
 import pytest
 
-from task_store import TaskStore
+from memory.task_store import TaskStore
 
 
 def test_tasks_survive_reopening_store_and_due_tasks_exclude_completed(tmp_path):

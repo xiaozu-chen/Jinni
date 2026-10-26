@@ -11,10 +11,10 @@ from typing import Any
 
 import httpx
 
-from config import settings
+from settings.config import settings
 from tools import TOOL_SCHEMAS
 
-DEFAULT_CASES = Path(__file__).with_name("eval_cases.json")
+DEFAULT_CASES = Path(__file__).resolve().parents[1] / "eval_cases.json"
 
 
 @dataclass(frozen=True)

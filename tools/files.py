@@ -12,7 +12,7 @@ from pathlib import Path
 from .registry import tool
 from . import workspace as workspace_tools
 from .provenance import write_typed_csv_provenance
-from patching import apply_exact_patches
+from runtime.patching import apply_exact_patches
 from .workspace import mark_written, safe_path
 
 MAX_READ = 4000

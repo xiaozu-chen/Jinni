@@ -21,7 +21,7 @@ from urllib.parse import urlsplit
 
 from openai.types.chat import ChatCompletionMessageParam
 
-from config import McpServerConfig, settings
+from settings.config import McpServerConfig, settings
 from tools.registry import add_tool, remove_tool
 
 log = logging.getLogger("jinni.mcp")

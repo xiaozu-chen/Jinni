@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 import tools.execution as execution
-from config import Settings, load_settings
+from settings.config import Settings, load_settings
 from tools import NEEDS_APPROVAL, TOOL_GROUPS
 from tools.sandbox import _is_appcontainer, run_isolated, sandbox_spec
 

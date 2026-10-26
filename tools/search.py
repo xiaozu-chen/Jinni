@@ -10,12 +10,12 @@ try:
 except ModuleNotFoundError:  # optional dependency; keep plugin importable for discovery
     DDGS = None
 
-from config import settings
+from settings.config import settings
 
 from .registry import tool
 from .provenance import write_search_csv_provenance
 from .workspace import mark_written, safe_path
-from search_snippet_data import extract_points, points_csv
+from presentation.search_snippet_data import extract_points, points_csv
 
 MAX_RESULTS = 5
 log = logging.getLogger("jinni.tools.search")

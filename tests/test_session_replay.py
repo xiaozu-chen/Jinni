@@ -3,8 +3,8 @@ import json
 
 import pytest
 
-import session_replay
-from session_replay import SessionRecorder, load_replay, render_replay, replay_path, replay_session
+import memory.session_replay as session_replay
+from memory.session_replay import SessionRecorder, load_replay, render_replay, replay_path, replay_session
 
 
 def test_recorder_round_trips_model_requests(tmp_path):

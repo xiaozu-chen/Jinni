@@ -7,9 +7,9 @@ import pytest
 
 pytest.importorskip("mcp")
 
-from config import McpServerConfig
-from mcp_client import McpManager
-from mcp_data import export_mcp_table
+from settings.config import McpServerConfig
+from server.mcp_client import McpManager
+from server.mcp_data import export_mcp_table
 from tools import registry
 
 SERVER = str(Path(__file__).parent / "fixtures" / "echo_server.py")
@@ -134,7 +134,7 @@ def test_jinni_read_only_server_exposes_fixed_tools_over_stdio(tmp_path):
         "import os, sys\n"
         f"os.chdir({str(server_root)!r})\n"
         f"sys.path.insert(0, {str(project)!r})\n"
-        "from mcp_server import main\n"
+        "from server.mcp_server import main\n"
         "main()\n",
         encoding="utf-8",
     )

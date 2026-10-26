@@ -1,8 +1,8 @@
 import logging
 from logging.handlers import RotatingFileHandler
 
-from config import settings
-from log_safety import SecretScrubber
+from settings.config import settings
+from runtime.log_safety import SecretScrubber
 
 def setup_logging() -> None:
     logger = logging.getLogger("jinni")

@@ -7,10 +7,10 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-import svgcharts
-from browser_runtime import run_browser_command
-from config import settings
-from export_png import ExportError, find_browser
+import presentation.svgcharts as svgcharts
+from runtime.browser_runtime import run_browser_command
+from settings.config import settings
+from presentation.export_png import ExportError, find_browser
 
 log = logging.getLogger("jinni.export")
 PDF_MAGIC = b"%PDF-"

@@ -5,9 +5,9 @@ from datetime import date, timedelta
 
 import pytest
 
-import memory
-from config import settings
-from memory import Proposal, Rejected, extraction_prompt, parse_proposals
+import memory.memory as memory
+from settings.config import settings
+from memory.memory import Proposal, Rejected, extraction_prompt, parse_proposals
 
 
 def test_add_and_list_facts_before_events(memory_store):

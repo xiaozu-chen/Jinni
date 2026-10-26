@@ -1,5 +1,5 @@
-from config import settings
-from context import compact, to_transcript
+from settings.config import settings
+from context.context import compact, to_transcript
 
 LONG = "x" * 500
 

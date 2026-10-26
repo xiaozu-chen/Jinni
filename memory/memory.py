@@ -10,7 +10,7 @@ from functools import lru_cache
 from pathlib import Path
 from uuid import uuid4
 
-from config import settings
+from settings.config import settings
 
 KINDS = ("fact", "event")
 

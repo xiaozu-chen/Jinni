@@ -7,7 +7,7 @@ import logging
 
 from tools import workspace
 from tools.workspace import safe_path
-from patching import apply_exact_patches
+from runtime.patching import apply_exact_patches
 
 log = logging.getLogger("jinni.approval_preview")
 

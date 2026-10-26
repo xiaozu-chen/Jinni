@@ -1,9 +1,9 @@
 import numpy as np
 import pytest
 
-import workspace_search
-from semantic import EmbedError
-from workspace_search import collect_chunks, format_results, search_workspace
+import runtime.workspace_search as workspace_search
+from memory.semantic import EmbedError
+from runtime.workspace_search import collect_chunks, format_results, search_workspace
 
 
 def test_chunking_tracks_line_ranges_and_bounds_chunk_size(monkeypatch):

@@ -2,13 +2,13 @@ import pytest
 
 from dataclasses import dataclass, replace
 
-import memory
-import semantic
-import task_store as tasks_db
+import memory.memory as memory
+import memory.semantic as semantic
+import memory.task_store as tasks_db
 from tools.web import reset_trusted_urls
-from memory import MemoryStore
+from memory.memory import MemoryStore
 from tools import workspace as ws
-from config import settings
+from settings.config import settings
 from tools import registry
 
 

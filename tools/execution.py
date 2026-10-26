@@ -8,7 +8,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-from config import settings
+from settings.config import settings
 from .registry import tool
 from . import workspace
 from .sandbox import (

@@ -9,15 +9,15 @@ import openai
 import pytest
 from types import SimpleNamespace
 
-from memory import Proposal
+from memory.memory import Proposal
 
-from agent import Agent, authorize, execute
-from agent_events import AgentEvent
-from models import ToolCall
+from runtime.agent import Agent, authorize, execute
+from runtime.agent_events import AgentEvent
+from context.models import ToolCall
 from tools import TOOL_FUNCTIONS
-import agent as agent_mod
-from audit import recent_calls
-from approval_preview import MAX_ARGUMENT_SUMMARY, summarize_arguments
+import runtime.agent as agent_mod
+from permission.audit import recent_calls
+from permission.approval_preview import MAX_ARGUMENT_SUMMARY, summarize_arguments
 from tools.web import trust_urls_from_text
 
 
@@ -387,7 +387,7 @@ def test_search_results_authorize_follow_up_fetch(monkeypatch):
 
 
 def test_always_allow_for_a_domain_is_persisted(workspace, monkeypatch):
-    from approval_store import load_approvals
+    from permission.approval_store import load_approvals
 
     trust_urls_from_text("https://example.com/page")
     monkeypatch.setattr("builtins.input", lambda _: "a")

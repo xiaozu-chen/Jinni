@@ -2,8 +2,8 @@
 
 import time
 
-from config import settings
-from semantic import EmbedError, embed_texts
+from settings.config import settings
+from memory.semantic import EmbedError, embed_texts
 
 PAIRS = [
     ("canine companion", "The user owns a puppy.", "related"),
@@ -51,7 +51,7 @@ def main() -> None:
         print(threshold_summary(related_scores, unrelated_scores))
     except EmbedError as error:
         print(f"Embedding benchmark could not reach {settings.embed_url}: {error}")
-        print("Start the configured embedding service, then run bench_embed.py again.")
+        print("Start the configured embedding service, then run python -m bench.bench_embed again.")
         raise SystemExit(1) from None
 
 

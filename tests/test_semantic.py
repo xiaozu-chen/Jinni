@@ -7,10 +7,10 @@ import httpx
 import numpy as np
 import pytest
 
-import semantic
-from bench_embed import threshold_summary
-from config import settings
-from semantic import EmbedError, catch_up, fuse, hybrid_search, rerank, semantic_search
+import memory.semantic as semantic
+from bench.bench_embed import threshold_summary
+from settings.config import settings
+from memory.semantic import EmbedError, catch_up, fuse, hybrid_search, rerank, semantic_search
 from tools.memory_tools import recall
 
 CONCEPTS = {"dog": 0, "canine": 0, "puppy": 0, "cat": 1, "feline": 1, "python": 2, "code": 2}
@@ -178,7 +178,7 @@ def test_semantic_search_finds_meaning_without_shared_words(memory_store, fake_s
 
 
 def test_embedding_duplicate_review_finds_near_duplicate_facts(memory_store, fake_server):
-    from semantic import similar_facts_by_embedding
+    from memory.semantic import similar_facts_by_embedding
 
     saved = memory_store.add("fact", "The user owns a puppy.")
     catch_up(memory_store)

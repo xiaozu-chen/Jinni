@@ -10,9 +10,9 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-import svgcharts
-from browser_runtime import run_browser_command
-from config import settings
+import presentation.svgcharts as svgcharts
+from runtime.browser_runtime import run_browser_command
+from settings.config import settings
 
 log = logging.getLogger("jinni.png")
 

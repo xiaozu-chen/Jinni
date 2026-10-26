@@ -9,9 +9,9 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
-from agent import Agent
-from config import settings
-from subagent import LAST_RUN_METRICS, effective_tool_menu
+from runtime.agent import Agent
+from settings.config import settings
+from runtime.subagent import LAST_RUN_METRICS, effective_tool_menu
 from tools import TOOL_FUNCTIONS
 from tools.delegate import register_delegate
 from tools import workspace

@@ -12,29 +12,29 @@ from typing import TYPE_CHECKING, Any, Callable
 import openai
 from openai import AsyncOpenAI
 
-from config import settings
-from context import compact, to_transcript
-from models import Message, ToolCall
-from retry import with_retries
-from thinking_classifier import (
+from settings.config import settings
+from context.context import compact, to_transcript
+from context.models import Message, ToolCall
+from runtime.retry import with_retries
+from runtime.thinking_classifier import (
     THINKING_CLASSIFIER_PROMPT, THINKING_CLASSIFIER_SCHEMA, parse_thinking_label,
 )
 from tools import TOOL_FUNCTIONS, REMEMBERABLE, SCOPES, NEEDS_APPROVAL, tool_names, tool_schemas
 from tools.registry import TOOL_GROUPS
 from tools.interaction import USER_INPUT_PROVIDER
 from tools.web import is_trusted_url, trust_urls_from_text
-import memory
-from memory import MemoryStore, Proposal, extraction_prompt, parse_proposals
+import memory.memory as memory
+from memory.memory import MemoryStore, Proposal, extraction_prompt, parse_proposals
 import inspect
-from approval_preview import change_preview, validate_python_change
-from audit import record_call
-from approval_preview import summarize_arguments
-from approval_store import save_approvals
-from agent_events import AgentEvent, EventSink
+from permission.approval_preview import change_preview, validate_python_change
+from permission.audit import record_call
+from permission.approval_preview import summarize_arguments
+from permission.approval_store import save_approvals
+from runtime.agent_events import AgentEvent, EventSink
 
 log = logging.getLogger("jinni.agent")
 if TYPE_CHECKING:
-    from session_replay import SessionRecorder
+    from memory.session_replay import SessionRecorder
 CHECKPOINTED_WRITES = {
     "write_file", "edit_file", "apply_patch", "delete_file", "make_chart", "fetch_table",
     "search_snippets_for_chart", "run_powershell",
@@ -320,7 +320,7 @@ class Agent:
                 return refusal
             if call.name in CHECKPOINTED_WRITES:
                 try:
-                    import project
+                    import runtime.project as project
                     from tools import workspace as workspace_tools
 
                     checkpoint = await asyncio.to_thread(

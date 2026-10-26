@@ -10,8 +10,8 @@ from typing import TYPE_CHECKING
 
 import httpx
 
-from config import settings
-from memory import Memory, MemoryStore
+from settings.config import settings
+from memory.memory import Memory, MemoryStore
 
 if TYPE_CHECKING:
     import numpy as np

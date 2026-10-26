@@ -2,8 +2,8 @@ import json
 
 import pytest
 
-from config import McpServerConfig
-from mcp_config import load_mcp_servers, resolve_mcp_servers
+from settings.config import McpServerConfig
+from server.mcp_config import load_mcp_servers, resolve_mcp_servers
 
 
 def test_load_mcp_server_definitions_from_json(tmp_path):

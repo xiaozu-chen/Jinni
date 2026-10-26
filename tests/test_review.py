@@ -1,8 +1,8 @@
 from datetime import date, timedelta
 
-from memory import Proposal
-from review import review, review_stale_facts
-import review as review_module
+from memory.memory import Proposal
+from runtime.review import review, review_stale_facts
+import runtime.review as review_module
 
 FACT = Proposal("fact", "The user's name is Carl.")
 NOTE = Proposal("event", "Read mm.txt.")

@@ -1,7 +1,7 @@
 """Compact old conversation turns while keeping recent context and tool-call pairing."""
 
-from config import settings
-from models import Message
+from settings.config import settings
+from context.models import Message
 
 def compact(messages: list[Message]) -> int:
     tool_idxs = [i for i, m in enumerate(messages) if m["role"] == "tool"]

@@ -2,7 +2,7 @@ import subprocess
 
 import pytest
 
-import browser_runtime
+import runtime.browser_runtime as browser_runtime
 
 
 class FakeProcess:

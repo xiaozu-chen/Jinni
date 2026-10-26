@@ -1,7 +1,7 @@
 from collections.abc import Callable
 from typing import Any, cast
 
-from mcp_server import build_server
+from server.mcp_server import build_server
 
 
 class FakeMCPServer:

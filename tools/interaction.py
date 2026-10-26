@@ -4,8 +4,8 @@ from contextvars import ContextVar
 from collections.abc import Callable
 
 from .registry import tool
-import task_store
-from task_store import TaskStore
+import memory.task_store as task_store
+from memory.task_store import TaskStore
 
 USER_INPUT_PROVIDER: ContextVar[Callable[[str, str, str], str] | None] = ContextVar(
     "jinni_user_input_provider", default=None,

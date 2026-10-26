@@ -4,7 +4,7 @@ from typing import Any, cast
 
 import pytest
 
-from coding_eval import (
+from bench.coding_eval import (
     CodingCase,
     build_tools,
     execute_scratch_tool,

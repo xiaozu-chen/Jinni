@@ -14,29 +14,29 @@ from pathlib import Path
 
 import httpx
 import webbrowser
-from config import GRAY, RESET, settings
-from agent_events import AgentEvent
-from mcp_config import resolve_mcp_servers
-from logger import setup_logging
-from agent import Agent
-from review import review, review_stale_facts
+from settings.config import GRAY, RESET, settings
+from runtime.agent_events import AgentEvent
+from server.mcp_config import resolve_mcp_servers
+from runtime.logger import setup_logging
+from runtime.agent import Agent
+from runtime.review import review, review_stale_facts
 from tools import LOAD_ERRORS, NEEDS_APPROVAL
 from tools.interaction import due_tasks, task_list
 from tools.workspace import find_chart
-from semantic import EmbedError, catch_up, hybrid_search, start_warmup
-from mcp_client import McpManager
-from export_png import ExportError, export_chart, parse_export_options
-from export_formats import export_pdf, export_svg
-from export_all import export_all
-from mcp_data import export_mcp_table
-from svgcharts import is_genuine_page
-from chart_records import check_chart_record, record_genuine_chart
-from audit import recent_calls
-from transcripts import load_transcript, save_transcript
-from session_replay import SessionRecorder, render_replay, replay_path, replay_session
-from embedding_server import EmbeddingServer
-from approval_store import load_approvals, save_approvals
-import project as project_tools
+from memory.semantic import EmbedError, catch_up, hybrid_search, start_warmup
+from server.mcp_client import McpManager
+from presentation.export_png import ExportError, export_chart, parse_export_options
+from presentation.export_formats import export_pdf, export_svg
+from presentation.export_all import export_all
+from server.mcp_data import export_mcp_table
+from presentation.svgcharts import is_genuine_page
+from presentation.chart_records import check_chart_record, record_genuine_chart
+from permission.audit import recent_calls
+from memory.transcripts import load_transcript, save_transcript
+from memory.session_replay import SessionRecorder, render_replay, replay_path, replay_session
+from server.embedding_server import EmbeddingServer
+from permission.approval_store import load_approvals, save_approvals
+import runtime.project as project_tools
 import tools.workspace as workspace_tools
 
 log = logging.getLogger("jinni.cli")

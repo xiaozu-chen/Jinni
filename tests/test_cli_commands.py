@@ -5,10 +5,10 @@ from typing import cast
 
 import pytest
 
-from config import McpServerConfig, load_settings, settings
-from agent import Agent
-from agent_events import AgentEvent
-from jinni import (
+from settings.config import McpServerConfig, load_settings, settings
+from runtime.agent import Agent
+from runtime.agent_events import AgentEvent
+from interface.cli.jinni import (
     config_text,
     enable_input_history,
     help_text,

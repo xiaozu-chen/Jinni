@@ -1,6 +1,6 @@
 from tools.registry import tool
 from tools.workspace import WORKSPACE
-from workspace_search import format_results, search_workspace
+from runtime.workspace_search import format_results, search_workspace
 
 
 @tool(

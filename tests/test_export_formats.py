@@ -4,11 +4,11 @@ from pathlib import Path
 
 import pytest
 
-import export_formats
-import svgcharts
-from config import settings
-from export_formats import export_pdf, export_svg
-from export_png import ExportError
+import presentation.export_formats as export_formats
+import presentation.svgcharts as svgcharts
+from settings.config import settings
+from presentation.export_formats import export_pdf, export_svg
+from presentation.export_png import ExportError
 from tools.charts import make_chart
 
 

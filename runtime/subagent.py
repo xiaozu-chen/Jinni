@@ -12,8 +12,8 @@ import weakref
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from config import settings
-from context import compact
+from settings.config import settings
+from context.context import compact
 from tools import NEEDS_APPROVAL, SUBAGENT_SAFE
 from tools.workspace import safe_path
 
@@ -157,7 +157,7 @@ def _loop_lock() -> asyncio.Lock:
 
 
 async def _run(task: str) -> tuple[str, int, int, int]:
-    from agent import Agent
+    from runtime.agent import Agent
 
     menu = effective_tool_menu()
     child = Agent(

@@ -4,8 +4,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from config import McpServerConfig
-from mcp_data import export_mcp_table, table_result_csv
+from settings.config import McpServerConfig
+from server.mcp_data import export_mcp_table, table_result_csv
 from tools.provenance import read_csv_provenance
 from tools.charts import make_chart
 

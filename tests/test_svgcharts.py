@@ -3,7 +3,7 @@ import xml.etree.ElementTree as ET
 
 import pytest
 
-import svgcharts
+import presentation.svgcharts as svgcharts
 
 SVG = "{http://www.w3.org/2000/svg}"
 

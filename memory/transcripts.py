@@ -4,7 +4,7 @@ import json
 import re
 from datetime import datetime
 
-from context import to_transcript
+from context.context import to_transcript
 from tools.workspace import safe_path
 
 MAX_TRANSCRIPT_CHARS = 500_000

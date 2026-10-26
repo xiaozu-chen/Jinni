@@ -1,6 +1,6 @@
 """Expose the opt-in, read-only subagent entry point."""
 
-from config import settings
+from settings.config import settings
 from .registry import add_tool
 
 DELEGATE_DESCRIPTION = (
@@ -13,7 +13,7 @@ DELEGATE_DESCRIPTION = (
 
 async def delegate(task: str) -> str:
     """Run one isolated lookup; the child cannot write or start another child."""
-    from subagent import ERROR_NESTED, SUBAGENT_DEPTH, run_subagent
+    from runtime.subagent import ERROR_NESTED, SUBAGENT_DEPTH, run_subagent
 
     if SUBAGENT_DEPTH.get() > 0:
         return ERROR_NESTED

@@ -1,6 +1,6 @@
 import json
 
-from approval_store import load_approvals, save_approvals
+from permission.approval_store import load_approvals, save_approvals
 
 
 def test_domain_approvals_round_trip(workspace):

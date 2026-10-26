@@ -2,8 +2,8 @@
 
 from datetime import date, timedelta
 
-from memory import MemoryStore, Proposal, Rejected
-from semantic import EmbedError, similar_facts_by_embedding
+from memory.memory import MemoryStore, Proposal, Rejected
+from memory.semantic import EmbedError, similar_facts_by_embedding
 
 STALE_FACT_DAYS = 365
 
