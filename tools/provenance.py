@@ -33,6 +33,19 @@ def write_typed_csv_provenance(csv_path: Path, data: bytes) -> dict:
     return record
 
 
+def write_search_csv_provenance(csv_path: Path, data: bytes, query: str, sources: list[dict[str, str]]) -> dict:
+    record = {
+        "kind": "snippet",
+        "source_url": "search://snippets",
+        "query": query[:200],
+        "sources": sources[:5],
+        "fetched_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "sha256": hashlib.sha256(data).hexdigest(),
+    }
+    _write_record(csv_path, record)
+    return record
+
+
 def _write_record(csv_path: Path, record: dict) -> None:
     target = sidecar_path(csv_path)
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -61,8 +74,17 @@ def read_csv_provenance(csv_path: Path) -> dict | None:
         if not all(isinstance(record.get(key), str) and record[key]
                    for key in ("source_url", "fetched_at")):
             return None
-        if record.get("kind", "source") not in ("source", "typed"):
+        if record.get("kind", "source") not in ("source", "typed", "snippet"):
             return None
+        if record.get("kind") == "snippet":
+            sources = record.get("sources")
+            if (not isinstance(record.get("query"), str) or len(record["query"]) > 200
+                    or not isinstance(sources, list) or len(sources) > 5
+                    or any(not isinstance(item, dict)
+                           or not isinstance(item.get("title"), str)
+                           or not isinstance(item.get("url"), str)
+                           for item in sources)):
+                return None
         record.setdefault("kind", "source")
         return record
     except (OSError, ValueError, TypeError):

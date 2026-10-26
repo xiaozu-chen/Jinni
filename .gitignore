@@ -6,7 +6,6 @@ memory.txt
 jinni.log
 .pytest_cache
 memory.db
-docs
 mcp-*.log
 freeze-*.txt
 settings.toml

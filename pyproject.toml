@@ -51,6 +51,7 @@ py-modules = [
   "review",
   "semantic",
   "session_replay",
+  "search_snippet_data",
   "svgcharts",
   "workspace_search",
   "task_store",

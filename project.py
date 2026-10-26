@@ -11,7 +11,10 @@ SKIP_COPY_DIRS = {
 }
 MAX_GUIDANCE_BYTES = 32_000
 PROJECT_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
-CHECKPOINTED_WRITES = {"write_file", "edit_file", "apply_patch", "delete_file", "make_chart", "fetch_table"}
+CHECKPOINTED_WRITES = {
+    "write_file", "edit_file", "apply_patch", "delete_file", "make_chart", "fetch_table",
+    "search_snippets_for_chart",
+}
 
 
 def _ignore_generated(directory: str, names: list[str]) -> set[str]:

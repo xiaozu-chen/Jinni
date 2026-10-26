@@ -25,7 +25,10 @@ from approval_store import save_approvals
 from agent_events import AgentEvent, EventSink
 
 log = logging.getLogger("jinni.agent")
-CHECKPOINTED_WRITES = {"write_file", "edit_file", "apply_patch", "delete_file", "make_chart", "fetch_table"}
+CHECKPOINTED_WRITES = {
+    "write_file", "edit_file", "apply_patch", "delete_file", "make_chart", "fetch_table",
+    "search_snippets_for_chart",
+}
 RETRYABLE = (openai.APIConnectionError, openai.InternalServerError)
 DECLINED = "The user declined this action. It was their choice, not a technical error. Do not retry; ask what they want instead."
 
@@ -219,7 +222,7 @@ class Agent:
                     return f"Error: {error}"
             result = await execute(call, args)
             name = call.name.lower()
-            if name == "web_search" or name.endswith("_search_text"):
+            if name in {"web_search", "search_snippets_for_chart"} or name.endswith("_search_text"):
                 trust_urls_from_text(result)
             return result
 

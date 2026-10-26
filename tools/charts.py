@@ -188,8 +188,12 @@ def make_chart(file: str, x_column: str, y_column: str, kind: str = "bar", title
         series = {name: all_series[name] for name in y_columns}
         secondary = {name: all_series[name] for name in secondary_columns}
         provenance = read_csv_provenance(source) if source.suffix.lower() == ".csv" else None
+        snippet_source = (
+            source.name.startswith("search-snippets-")
+            or bool(provenance and provenance.get("kind") == "snippet")
+        )
         typed_by_model = (
-            bool(provenance and provenance.get("kind") == "typed")
+            bool(provenance and provenance.get("kind") in {"typed", "snippet"})
             or (was_written(source) and provenance is None)
         )
 
@@ -207,7 +211,13 @@ def make_chart(file: str, x_column: str, y_column: str, kind: str = "bar", title
         else:
             svg = svgcharts.line_chart(labels, series, title, x_column, ", ".join(y_columns), secondary)
 
-        if provenance and provenance.get("kind") == "typed":
+        if snippet_source:
+            fetched = provenance["fetched_at"][:10] if provenance else "date unavailable"
+            query = str((provenance or {}).get("query") or "query unavailable")[:80]
+            sources = (provenance or {}).get("sources") or []
+            source_count = len(sources) if isinstance(sources, list) else 0
+            subtitle = f"Source: search snippets for {query}, fetched {fetched} · {source_count} source(s) · {len(labels)} rows · numbers unverified"
+        elif provenance and provenance.get("kind") == "typed":
             created = provenance["fetched_at"][:10]
             subtitle = f"Source: typed by Jinni, recorded {created} · {len(labels)} rows"
         elif provenance:
@@ -215,7 +225,7 @@ def make_chart(file: str, x_column: str, y_column: str, kind: str = "bar", title
             subtitle = f"Source: {provenance['source_url']}, fetched {fetched} · {len(labels)} rows"
         else:
             subtitle = f"Source: {file} · {len(labels)} rows"
-        if typed_by_model:
+        if typed_by_model and not snippet_source:
             subtitle += " · numbers unverified"
         page = svgcharts.html_page(title, subtitle, svg)
 
@@ -227,7 +237,12 @@ def make_chart(file: str, x_column: str, y_column: str, kind: str = "bar", title
             record_note = ""
         except OSError:
             record_note = " The integrity record could not be saved, so /open will use its structural check."
-        note = " Note: Jinni typed this data, so tell the user its numbers are unverified." if typed_by_model else ""
+        note = (
+            " Note: these values came from search snippets and need checking against their source pages."
+            if snippet_source else
+            " Note: Jinni typed this data, so tell the user its numbers are unverified."
+            if typed_by_model else ""
+        )
         return f"Saved the chart to {CHART_DIR}/{slug}.html ({len(labels)} rows). Tell the user to type /open to view it.{note}{record_note}"
     except FileNotFoundError:
         return f"Error: '{file}' was not found in the workspace."
