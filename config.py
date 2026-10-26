@@ -33,6 +33,18 @@ class Settings:
     max_steps: int = 8
     thinking_default: bool = False
 
+    # Read-only helper runs stay opt-in until the local A/B evaluation is recorded.
+    subagents_enabled: bool = False
+    subagent_tools: tuple[str, ...] = (
+        "read_file", "search_files", "find_files", "code_outline", "project_tree",
+    )
+    subagent_max_laps: int = 6
+    subagent_timeout: float = 90.0
+    subagent_task_chars: int = 500
+    subagent_result_chars: int = 600
+    subagent_max_pointers: int = 8
+    subagent_thinking: bool = False
+
     # context management
     context_limit: int = 16384 # must match the -c of llama-server
     compact_at: float = 0.7 
@@ -159,6 +171,10 @@ def load_settings(path: str | Path | None = None) -> Settings:
             if not isinstance(value, list) or any(not isinstance(item, str) for item in value):
                 raise ValueError("embed_server_args must be an array of strings")
             parsed[name] = tuple(value)
+        elif name == "subagent_tools":
+            if not isinstance(value, list) or any(not isinstance(item, str) for item in value):
+                raise ValueError("subagent_tools must be an array of strings")
+            parsed[name] = tuple(value)
         elif name == "mcp_servers":
             if not isinstance(value, list) or any(not isinstance(item, dict) for item in value):
                 raise ValueError("mcp_servers must be an array of tables")
@@ -168,6 +184,11 @@ def load_settings(path: str | Path | None = None) -> Settings:
 
     if "near_duplicate_similarity" in parsed and not 0.0 <= parsed["near_duplicate_similarity"] <= 1.0:
         raise ValueError("near_duplicate_similarity must be between 0 and 1")
+    for name in ("subagent_max_laps", "subagent_task_chars", "subagent_result_chars", "subagent_max_pointers"):
+        if name in parsed and parsed[name] < 1:
+            raise ValueError(f"{name} must be positive")
+    if "subagent_timeout" in parsed and parsed["subagent_timeout"] <= 0:
+        raise ValueError("subagent_timeout must be positive")
     for timeout in ("embed_server_start_timeout", "embed_server_stop_timeout"):
         if timeout in parsed and parsed[timeout] <= 0:
             raise ValueError(f"{timeout} must be positive")

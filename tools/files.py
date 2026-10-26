@@ -111,6 +111,7 @@ def list_files(path: str = ".") -> str:
         "end": "Optional last line number (inclusive). Leave 0 to read up to 200 lines from start.",
     },
     group="project",
+    subagent_safe=True,
 )
 def read_file(path: str, start: int = 0, end: int = 0) -> str:
     try:
@@ -150,6 +151,7 @@ def read_file(path: str, start: int = 0, end: int = 0) -> str:
         "regex": "Set true to treat query as a regular expression; false searches literal text.",
     },
     group="project",
+    subagent_safe=True,
 )
 def search_files(query: str, path: str = ".", regex: bool = False) -> str:
     if not query.strip():
@@ -212,6 +214,7 @@ def search_files(query: str, path: str = ".", regex: bool = False) -> str:
         "path": "Workspace directory to search, defaulting to the workspace root.",
     },
     group="project",
+    subagent_safe=True,
 )
 def find_files(pattern: str, path: str = ".") -> str:
     pattern_error = _valid_pattern(pattern)
@@ -246,6 +249,7 @@ def find_files(pattern: str, path: str = ".") -> str:
     description="Show classes and functions declared in a Python file, with line numbers.",
     params={"path": "Python file path relative to the workspace."},
     group="project",
+    subagent_safe=True,
 )
 def code_outline(path: str) -> str:
     try:
@@ -279,6 +283,7 @@ def code_outline(path: str) -> str:
         "max_entries": "Maximum entries to show, from 1 to 500.",
     },
     group="project",
+    subagent_safe=True,
 )
 def project_tree(path: str = ".", max_depth: int = 3, max_entries: int = 300) -> str:
     if not 1 <= max_depth <= 8 or not 1 <= max_entries <= 500:

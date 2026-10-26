@@ -161,6 +161,11 @@ at run time). Locking PowerShell down from the inside does not help either:
 
 - [x] 5 to 10 tiny tasks in scratch repos ("fix this failing test", "rename this function everywhere") with automatic pass/fail. Used to compare thinking on/off, model versions, and tool-menu sizes. _[M / low]_ (five bounded scratch tasks; static checks only, generated code is not executed)
 
+### 4.10 Read-only subagents
+
+- [x] **`delegate` research helper:** one fresh-context, read-only sub-run with verified file pointers. Off by default; safe tools are allowlisted in code. _[M / medium]_
+- A/B result: **pending**. Keep `subagents_enabled = false` until runs with and without delegation record pass rate, peak orchestrator context, total tokens, wall time, and verified/dropped pointers for the same 3–5 research-heavy coding tasks.
+
 ---
 
 ## 5. Permissions and safety

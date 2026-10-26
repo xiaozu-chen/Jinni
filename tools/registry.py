@@ -9,6 +9,7 @@ TOOL_SCHEMAS: list[dict[str, Any]] = []
 NEEDS_APPROVAL: set[str] = set()
 REMEMBERABLE: set[str] = set()
 TOOL_GROUPS: dict[str, str] = {}
+SUBAGENT_SAFE: set[str] = set()
 
 ScopeFn = Callable[[dict[str, Any]], str]
 SCOPES: dict[str, ScopeFn] = {}
@@ -23,9 +24,11 @@ def tool_names(project_active: bool | None = None) -> set[str]:
     }
 
 
-def tool_schemas(project_active: bool | None = None) -> list[dict[str, Any]]:
-    names = tool_names(project_active)
-    return [schema for schema in TOOL_SCHEMAS if schema["function"]["name"] in names]
+def tool_schemas(project_active: bool | None = None, names: set[str] | None = None) -> list[dict[str, Any]]:
+    visible = tool_names(project_active)
+    if names is not None:
+        visible &= names
+    return [schema for schema in TOOL_SCHEMAS if schema["function"]["name"] in visible]
 
 
 def add_tool(name: str, 
@@ -34,7 +37,8 @@ def add_tool(name: str,
              parameters: dict[str, Any], 
              approval: bool = False, 
              remember: bool = False,
-             group: str = "core") -> None:
+             group: str = "core",
+             subagent_safe: bool = False) -> None:
     """Keep the function, schema, group, and approval sets in sync as one registration."""
     if name in TOOL_FUNCTIONS:
         raise ValueError(f"tool '{name}' is already registered")
@@ -48,6 +52,8 @@ def add_tool(name: str,
         NEEDS_APPROVAL.add(name)
     if remember:
         REMEMBERABLE.add(name)
+    if subagent_safe and not approval:
+        SUBAGENT_SAFE.add(name)
 
 
 def remove_tool(name: str) -> None:
@@ -56,6 +62,7 @@ def remove_tool(name: str) -> None:
     REMEMBERABLE.discard(name)
     SCOPES.pop(name, None)
     TOOL_GROUPS.pop(name, None)
+    SUBAGENT_SAFE.discard(name)
     TOOL_SCHEMAS[:] = [s for s in TOOL_SCHEMAS if s["function"]["name"] != name]
 
 
@@ -64,7 +71,8 @@ def tool(description: str,
          approval: bool = False, 
          remember: bool = False, 
          scope: ScopeFn | None = None,
-         group: str = "core"):
+         group: str = "core",
+         subagent_safe: bool = False):
     """Turn a documented Python function into a model-visible schema entry."""
     if remember and not approval:
         raise ValueError("remember=True only make sense together with approval=True")
@@ -93,7 +101,7 @@ def tool(description: str,
         if required:
             schema["required"] = required
 
-        add_tool(name, fn, description, schema, approval, remember, group)
+        add_tool(name, fn, description, schema, approval, remember, group, subagent_safe)
         if scope:
             SCOPES[name] = scope
         return fn
