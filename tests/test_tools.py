@@ -237,6 +237,15 @@ def test_url_check_rejects_a_mixed_public_and_private_dns_answer(monkeypatch):
         check_public_url("https://rebound.example")
 
 
+def test_url_check_rejects_malformed_dns_socket_addresses(monkeypatch):
+    monkeypatch.setattr(web.socket, "getaddrinfo", lambda *args, **kwargs: [
+        (2, 1, 6, "", ()),
+    ])
+
+    with pytest.raises(ValueError, match="invalid address"):
+        check_public_url("https://rebound.example")
+
+
 def test_pinned_target_preserves_http_host_and_tls_name():
     target, headers, extensions = web._pinned_target(
         "https://example.com:8443/path?q=1", ["8.8.8.8"]

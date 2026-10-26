@@ -153,10 +153,13 @@ class TableExtractor(HTMLParser):
 
     def handle_endtag(self, tag):
         if tag in ("td", "th") and self.depth == 1 and self.cell is not None:
-            self.row.append(" ".join(" ".join(self.cell).split()))
+            row = self.row
+            if row is not None:
+                row.append(" ".join(" ".join(self.cell).split()))
             self.cell = None
-        elif tag == "tr" and self.depth == 1 and self.row is not None:
-            self.table.append(self.row)
+        elif tag == "tr" and self.depth == 1:
+            if self.table is not None and self.row is not None:
+                self.table.append(self.row)
             self.row = None
         elif tag == "table" and self.depth:
             self.depth -= 1
@@ -229,7 +232,13 @@ def check_public_url(url: str) -> list[str]:
         raise ValueError("only http and https URLs are allowed")
     addresses = []
     for info in socket.getaddrinfo(parts.hostname, parts.port, type=socket.SOCK_STREAM):
-        ip = ipaddress.ip_address(info[4][0].split("%")[0])
+        try:
+            resolved_address = info[4][0]
+        except (IndexError, TypeError):
+            raise ValueError("DNS returned an invalid address") from None
+        if not isinstance(resolved_address, str):
+            raise ValueError("DNS returned an invalid address")
+        ip = ipaddress.ip_address(resolved_address.split("%")[0])
         if not ip.is_global:
             raise ValueError("that address is private or local, which is not allowed")
         rendered = str(ip)
