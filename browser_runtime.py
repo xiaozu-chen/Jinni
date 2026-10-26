@@ -37,7 +37,9 @@ def run_browser_command(command: list[str], timeout: float) -> subprocess.Comple
             try:
                 if process.pid is not None:
                     kill_process_group = cast(Callable[[int, int], None], getattr(os, "killpg"))
-                    kill_process_group(process.pid, int(signal.SIGKILL))
+                    kill_signal = getattr(signal, "SIGKILL", None)
+                    if kill_signal is not None:
+                        kill_process_group(process.pid, int(kill_signal))
             except ProcessLookupError:
                 pass
         try:
