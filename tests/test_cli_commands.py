@@ -6,15 +6,25 @@ import pytest
 
 from config import McpServerConfig, load_settings, settings
 from agent import Agent
+from agent_events import AgentEvent
 from jinni import (
     config_text,
     enable_input_history,
     help_text,
     mcp_restart_target,
+    render_agent_event,
     show_memories,
     stats_text,
     undo_last_turn,
 )
+
+
+def test_cli_renders_agent_events(capsys):
+    render_agent_event(AgentEvent("status", "tool ready"))
+    render_agent_event(AgentEvent("text_delta", "hello"))
+    render_agent_event(AgentEvent("text_end"))
+
+    assert capsys.readouterr().out == "tool ready\nhello\n"
 
 
 def test_help_lists_the_interactive_commands():

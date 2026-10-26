@@ -9,7 +9,8 @@ from datetime import date, timedelta
 
 import httpx
 import webbrowser
-from config import settings
+from config import GRAY, RESET, settings
+from agent_events import AgentEvent
 from mcp_config import resolve_mcp_servers
 from logger import setup_logging
 from agent import Agent
@@ -34,6 +35,21 @@ import project as project_tools
 import tools.workspace as workspace_tools
 
 log = logging.getLogger("jinni.cli")
+
+
+def render_agent_event(event: AgentEvent) -> None:
+    if event.kind == "status":
+        print(event.text)
+    elif event.kind == "thinking_start":
+        print(f"{GRAY}[thinking]", end="", flush=True)
+    elif event.kind == "thinking_delta":
+        print(f"{GRAY}{event.text}{RESET}", end="", flush=True)
+    elif event.kind == "thinking_end":
+        print(f"{RESET}\n")
+    elif event.kind == "text_delta":
+        print(event.text, end="", flush=True)
+    elif event.kind == "text_end":
+        print()
 
 
 def show_memories(agent: Agent, query: str = "") -> None:
@@ -228,7 +244,7 @@ def main(argv: list[str] | None = None) -> None:
 
     project_active = (active_workspace / ".jinni" / "managed-project").is_file()
     agent = Agent(project_guidance=project_guidance, allowed_file=settings.allowed_file,
-                  project_active=project_active)
+                  project_active=project_active, event_sink=render_agent_event)
     agent.allowed.update(load_approvals(settings.allowed_file))
     embedding_server = EmbeddingServer(settings)
     if embedding_server.configured:

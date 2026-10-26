@@ -8,7 +8,7 @@ from typing import Any
 import openai
 from openai import AsyncOpenAI
 
-from config import settings, GRAY, RESET
+from config import settings
 from context import compact, to_transcript
 from models import Message, ToolCall
 from retry import with_retries
@@ -22,6 +22,7 @@ from approval_preview import change_preview, validate_python_change
 from audit import record_call
 from approval_preview import summarize_arguments
 from approval_store import save_approvals
+from agent_events import AgentEvent, EventSink
 
 log = logging.getLogger("jinni.agent")
 CHECKPOINTED_WRITES = {"write_file", "edit_file", "apply_patch", "delete_file", "make_chart", "fetch_table"}
@@ -31,6 +32,7 @@ DECLINED = "The user declined this action. It was their choice, not a technical 
 def authorize(
     call: ToolCall,
     allowed: set[tuple[str, str]] | None = None,
+    emit: EventSink | None = None,
 ) -> tuple[dict[str, Any] | None, str]:
     # Returns (args, "") if the call may run, or (None, message_for_the_model).
     allowed = set() if allowed is None else allowed
@@ -41,7 +43,9 @@ def authorize(
     if not isinstance(args, dict):
         return None, "Error: the arguments must be a JSON object."
 
-    print(f"  [tool] {call.name}({summarize_arguments(args)})")
+    notice = AgentEvent("status", f"  [tool] {call.name}({summarize_arguments(args)})")
+    if emit:
+        emit(notice)
     log.info("tool calls: %s %s", call.name, summarize_arguments(args))
 
     if call.name not in TOOL_FUNCTIONS:
@@ -62,7 +66,9 @@ def authorize(
             if call.name == "apply_patch" and preview and preview.startswith("Change preview unavailable:"):
                 return None, preview
             if preview:
-                print("  proposed change:\n" + preview)
+                notice = AgentEvent("status", "  proposed change:\n" + preview)
+                if emit:
+                    emit(notice)
         if not auto_approved:
             can_remember = call.name in REMEMBERABLE and scope != ""
             if can_remember:
@@ -99,7 +105,8 @@ async def execute(call: ToolCall, args: dict[str, Any]) -> str:
 
 class Agent:
     def __init__(self, store: MemoryStore | None = None, project_guidance: str = "",
-                 allowed_file=None, project_active: bool | None = None) -> None:
+                 allowed_file=None, project_active: bool | None = None,
+                 event_sink: EventSink | None = None) -> None:
         self.client = AsyncOpenAI(
             base_url=settings.base_url, 
             api_key="not-needed", 
@@ -116,6 +123,8 @@ class Agent:
         self.replay_recorder = None
         self.allowed_file = allowed_file
         self.project_active = project_active
+        self.event_sink = event_sink
+        self.events: list[AgentEvent] = []
         self.stats = {
             "laps": 0,
             "prompt_tokens": 0,
@@ -125,6 +134,12 @@ class Agent:
         self.tool_counts: Counter[str] = Counter()
         self.memory: MemoryStore = store if store is not None else memory.get_store()
         self.apply_memory()
+
+    def emit(self, event: AgentEvent) -> None:
+        if self.event_sink:
+            self.event_sink(event)
+        else:
+            self.events.append(event)
 
     def set_project_active(self, active: bool) -> None:
         self.project_active = active
@@ -173,7 +188,7 @@ class Agent:
         plans = [
             (None, "Error: project tools are available only after selecting a managed project.")
             if self.project_active is False and TOOL_GROUPS.get(call.name) == "project"
-            else authorize(call, self.allowed)
+            else authorize(call, self.allowed, self.emit)
             for call in calls
         ]
         if self.allowed_file and self.allowed != previous_approvals:
@@ -222,7 +237,7 @@ class Agent:
                 how = ""
             else:
                 how = " in parallel" if run_parallel else " one, by one"
-            print(f"  ({runnable} tool call(s){how}: {time.perf_counter() - start:.1f}s)")
+            self.emit(AgentEvent("status", f"  ({runnable} tool call(s){how}: {time.perf_counter() - start:.1f}s)"))
         return results
 
     async def stream_response(self) -> tuple[str, list[ToolCall], int]:
@@ -262,15 +277,15 @@ class Agent:
 
                 if thought and self.thinking_on:
                     if not thinking:
-                        print(f"{GRAY}[thinking]", end="")
+                        self.emit(AgentEvent("thinking_start"))
                         thinking = True
-                    print(f"{GRAY}{thought}{RESET}", end="", flush=True)
+                    self.emit(AgentEvent("thinking_delta", thought))
 
                 if delta.content:
                     if thinking:
-                        print(f"{RESET}\n")
+                        self.emit(AgentEvent("thinking_end"))
                         thinking = False
-                    print(delta.content, end="", flush=True)
+                    self.emit(AgentEvent("text_delta", delta.content))
                     content += delta.content
 
                 for tc in delta.tool_calls or []:
@@ -287,9 +302,9 @@ class Agent:
             await stream.close()
 
         if thinking:
-            print(RESET)
+            self.emit(AgentEvent("thinking_end"))
         if content:
-            print()
+            self.emit(AgentEvent("text_end"))
 
         total = time.perf_counter() - start
         self.stats["laps"] += 1
@@ -298,7 +313,7 @@ class Agent:
         self.stats["seconds"] += total
         if first is not None and total > first and generated:
             speed = generated / (total - first)
-            print(f"  (first token {first:.1f}s | total {total:.1f}s | {generated} tokens | {speed:.0f} tok/s)")
+            self.emit(AgentEvent("status", f"  (first token {first:.1f}s | total {total:.1f}s | {generated} tokens | {speed:.0f} tok/s)"))
             log.info("lap timing: first=%.1fs total=%.1fs tokens=%d", first, total, generated)
         
         tool_calls = [
@@ -340,8 +355,8 @@ class Agent:
 
         self.apply_memory()
         del self.messages[1:cut]
-        print(f"  (summarized {len(old)} messages into notes)")
-        print(f"  notes: {self.summary}")
+        self.emit(AgentEvent("status", f"  (summarized {len(old)} messages into notes)"))
+        self.emit(AgentEvent("status", f"  notes: {self.summary}"))
         return True
 
     async def propose_memories(self) -> list[Proposal]: 
@@ -388,10 +403,10 @@ class Agent:
                     answer = "n"
                 if answer == "y":
                     step_limit += max(1, settings.max_steps)
-                    print("  (continuing for another step block)")
+                    self.emit(AgentEvent("status", "  (continuing for another step block)"))
                     continue
                 log.info("hit step limit (%d), user chose stop", step_limit)
-                print("(stopped at the step limit)")
+                self.emit(AgentEvent("status", "(stopped at the step limit)"))
                 break
             self.apply_memory()
             try:
@@ -399,23 +414,23 @@ class Agent:
             except Exception as e:
                 log.exception("model request failed")
                 del self.messages[turn_start:]
-                print(f"\n  (lost the connection to the model: {type(e).__name__}. see {settings.log_file})")
-                print("  (that whole turn was dropped, send your message again)")
+                self.emit(AgentEvent("status", f"\n  (lost the connection to the model: {type(e).__name__}. see {settings.log_file})"))
+                self.emit(AgentEvent("status", "  (that whole turn was dropped, send your message again)"))
                 return
 
-            print(f"  (context: {used}/{settings.context_limit})")
+            self.emit(AgentEvent("status", f"  (context: {used}/{settings.context_limit})"))
             log.info("lap %d: context %d/%d", step + 1, used, settings.context_limit)
             if used > settings.context_limit * settings.compact_at:
                 n = compact(self.messages)
                 if n:
-                    print(f"  (compacted {n} old tool results)")
+                    self.emit(AgentEvent("status", f"  (compacted {n} old tool results)"))
                     log.info("compacted %d old tool results", n)
             if used > settings.context_limit * settings.summarize_at:
                 try:
                     await self.summarize_history()
                 except Exception:
                     log.exception("summarizing failed")
-                    print("  (could not summarize, continuing without it)")
+                    self.emit(AgentEvent("status", "  (could not summarize, continuing without it)"))
 
             if not calls:
                 log.info("jinni: %s", content[:200])

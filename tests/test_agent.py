@@ -11,6 +11,7 @@ from types import SimpleNamespace
 from memory import Proposal
 
 from agent import Agent, authorize, execute
+from agent_events import AgentEvent
 from models import ToolCall
 from tools import TOOL_FUNCTIONS
 import agent as agent_mod
@@ -64,10 +65,12 @@ def test_approved_write_shows_bounded_diff_and_redacts_audit(workspace, monkeypa
     monkeypatch.setattr("builtins.input", lambda _: "y")
     call = make_call("write_file", {"path": "note.txt", "content": "private notes"})
 
-    args, _ = authorize(call)
+    events = []
+    args, _ = authorize(call, emit=events.append)
     asyncio.run(execute(call, args))
 
-    prompt = capsys.readouterr().out
+    prompt = "\n".join(event.text for event in events)
+    assert capsys.readouterr().out == ""
     assert "+private notes" in prompt
     audit = recent_calls()
     assert "[approved] write_file" in audit
@@ -75,13 +78,14 @@ def test_approved_write_shows_bounded_diff_and_redacts_audit(workspace, monkeypa
     assert "private notes" not in audit
 
 
-def test_overwrite_preview_warns_that_existing_file_will_be_replaced(workspace, monkeypatch, capsys):
+def test_overwrite_preview_warns_that_existing_file_will_be_replaced(workspace, monkeypatch):
     (workspace / "note.txt").write_text("old", encoding="utf-8")
     monkeypatch.setattr("builtins.input", lambda _: "n")
 
-    authorize(make_call("write_file", {"path": "note.txt", "content": "new"}))
+    events = []
+    authorize(make_call("write_file", {"path": "note.txt", "content": "new"}), emit=events.append)
 
-    assert "Existing file will be overwritten." in capsys.readouterr().out
+    assert "Existing file will be overwritten." in "\n".join(event.text for event in events)
     assert (workspace / "note.txt").read_text(encoding="utf-8") == "old"
 
 
@@ -411,10 +415,12 @@ def test_step_limit_stops_when_user_says_no(monkeypatch, capsys):
         return "", [make_call("get_current_time", {})], 10
 
     monkeypatch.setattr(Agent, "stream_response", fake_stream)
-    agent = Agent()
+    events: list[AgentEvent] = []
+    agent = Agent(event_sink=events.append)
 
     asyncio.run(agent.chat("one more thing"))
 
     assert len(calls) == 1
-    assert "stopped at the step limit" in capsys.readouterr().out
+    assert "stopped at the step limit" in "\n".join(event.text for event in events)
+    assert capsys.readouterr().out == ""
     assert agent.messages[-1]["role"] == "tool"

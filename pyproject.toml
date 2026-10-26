@@ -23,6 +23,7 @@ jinni = "jinni:main"
 [tool.setuptools]
 py-modules = [
   "agent",
+  "agent_events",
   "approval_store",
   "approval_preview",
   "audit",
