@@ -150,6 +150,7 @@ class Agent:
         self.project_guidance = project_guidance
         self.thinking_override = thinking_override
         self.thinking_on: bool = settings.thinking_default if thinking_override is None else thinking_override
+        self.thinking_source = "default" if thinking_override is None else "manual"
         self.parallel_tools: bool = settings.parallel_tools
         self.allowed: set[tuple[str, str]] = set()
         self.write_checkpoint: str | None = None
@@ -206,6 +207,7 @@ class Agent:
                 settings.thinking_default if self.thinking_override is None
                 else self.thinking_override
             )
+            self.thinking_source = "default" if self.thinking_override is None else "manual"
             return self.thinking_on
         try:
             response = await self.thinking_classifier.chat.completions.create(
@@ -223,9 +225,11 @@ class Agent:
             if selected is None:
                 raise ValueError("classifier returned an invalid label")
             self.thinking_on = selected
+            self.thinking_source = "classified"
             log.info("thinking classifier selected %s", "on" if self.thinking_on else "off")
         except Exception as error:
             self.thinking_on = settings.thinking_default
+            self.thinking_source = "default"
             log.warning("thinking classifier failed (%s); using configured default", type(error).__name__)
             self.emit(AgentEvent(
                 "status",
@@ -505,9 +509,9 @@ class Agent:
     async def _turn(self, user_text: str) -> None:
         turn_start = len(self.messages)
         log.info("user: %s", user_text[:200])
-        if self.thinking_override is None and self.thinking_classifier is not None:
-            selected = await self.classify_thinking(user_text)
-            self.emit(AgentEvent("status", f"  (thinking: {'on' if selected else 'off'}; classified)"))
+        selected = await self.classify_thinking(user_text)
+        source = f"; {self.thinking_source}" if self.thinking_source != "default" else ""
+        self.emit(AgentEvent("status", f"  (thinking: {'on' if selected else 'off'}{source})"))
         trust_urls_from_text(user_text)
         self.messages.append({"role": "user", "content": user_text})
 

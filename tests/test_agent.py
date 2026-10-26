@@ -77,6 +77,47 @@ def test_thinking_classifier_falls_back_on_invalid_output(monkeypatch):
     assert agent.thinking_on is False
 
 
+def test_turn_reports_automatic_manual_and_default_thinking_modes(monkeypatch):
+    monkeypatch.setattr(
+        agent_mod, "settings",
+        replace(agent_mod.settings, thinking_classifier_model="tiny-router", thinking_default=False),
+    )
+    labels = iter(["on", "off"])
+    events = []
+
+    class Completions:
+        async def create(self, **kwargs):
+            return SimpleNamespace(choices=[SimpleNamespace(
+                message=SimpleNamespace(content=next(labels)),
+            )])
+
+    async def fake_stream(self):
+        return "done", [], 1
+
+    monkeypatch.setattr(Agent, "stream_response", fake_stream)
+    agent = Agent(event_sink=events.append)
+    agent.thinking_classifier = SimpleNamespace(
+        chat=SimpleNamespace(completions=Completions()),
+    )
+
+    async def scenario():
+        await agent.chat("an analytical request")
+        await agent.chat("a simple request")
+        agent.thinking_override = True
+        await agent.chat("a manually enabled request")
+        agent.thinking_override = None
+        agent.thinking_classifier = None
+        await agent.chat("a default request")
+
+    asyncio.run(scenario())
+
+    statuses = [event.text for event in events if event.kind == "status"]
+    assert "  (thinking: on; classified)" in statuses
+    assert "  (thinking: off; classified)" in statuses
+    assert "  (thinking: on; manual)" in statuses
+    assert "  (thinking: off)" in statuses
+
+
 def test_unknown_tool():
     args, message = authorize(make_call("hack_pc", {}))
     assert args is None
