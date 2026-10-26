@@ -42,6 +42,8 @@ MCP tool calls are checked against each server's advertised input schema before 
 
 Use `/replay start NAME` to record model requests and expected tool choices locally, `/replay stop` to finish, and `/replay run NAME [MODEL]` to compare choices against a model. Replays store conversation context under `workspace/.jinni/replays/`; only start recording when that local data is appropriate to save. Replay never runs the model's selected tools.
 
+With a managed project selected, Jinni also offers `search_workspace_files` for semantic search across bounded, readable project files. It skips generated and secret files, reports source line ranges, and falls back to keyword matching if the embedding service is unavailable.
+
 Jinni only fetches URLs that the user supplied or that appeared in a web-search result during the session. The existing per-domain approval still applies.
 
 ## Memory maintenance
