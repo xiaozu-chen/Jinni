@@ -1,7 +1,0 @@
-[
-  {"prompt": "What is 19 times 23?", "expected_tools": ["calculate"]},
-  {"prompt": "List the files in the current project.", "expected_tools": ["list_files"]},
-  {"prompt": "Find files matching test_*.py.", "expected_tools": ["find_files"]},
-  {"prompt": "Search the project for TODO comments.", "expected_tools": ["search_files"]},
-  {"prompt": "What time is it right now?", "expected_tools": ["get_current_time"]}
-]
