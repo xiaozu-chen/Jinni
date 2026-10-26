@@ -1,3 +1,5 @@
+"""Expose reviewed memory search and proposal actions to the model."""
+
 import memory
 from memory import Rejected
 import semantic

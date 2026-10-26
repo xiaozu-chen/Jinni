@@ -1,3 +1,5 @@
+"""Load MCP server entries and resolve configured executable paths before launch."""
+
 import json
 import math
 import re

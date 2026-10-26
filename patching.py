@@ -1,3 +1,5 @@
+"""Apply exact multi-range text patches atomically after validating every source match."""
+
 from __future__ import annotations
 
 from typing import Any

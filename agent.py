@@ -1,3 +1,7 @@
+"""Coordinate model turns, tool policy, approvals, execution, and conversation state.
+
+Tool calls are validated before they run; project writes get checkpoints and bounded results."""
+
 import asyncio
 import json
 import time
@@ -37,7 +41,7 @@ def authorize(
     allowed: set[tuple[str, str]] | None = None,
     emit: EventSink | None = None,
 ) -> tuple[dict[str, Any] | None, str]:
-    # Returns (args, "") if the call may run, or (None, message_for_the_model).
+    # Treat model output as a proposal: validate it, apply policy, then ask the human if needed.
     allowed = set() if allowed is None else allowed
     try:
         args = json.loads(call.arguments or "{}")
@@ -107,6 +111,8 @@ async def execute(call: ToolCall, args: dict[str, Any]) -> str:
         return f"Error: {e}"
 
 class Agent:
+    """Own one conversation and connect model responses to the registered tool system."""
+
     def __init__(self, store: MemoryStore | None = None, project_guidance: str = "",
                  allowed_file=None, project_active: bool | None = None,
                  event_sink: EventSink | None = None) -> None:
@@ -184,10 +190,10 @@ class Agent:
             text += "\n\nNotes from earlier in this conversation:\n" + self.summary
         self.messages[0]["content"] = text
 
-    # new: async tool running
     async def run_tools(self, calls: list[ToolCall]) -> list[str]:
         self.tool_counts.update(call.name for call in calls)
         previous_approvals = self.allowed.copy()
+        # Decide all approvals before starting the batch, so parallel calls can't outrun consent.
         plans = [
             (None, "Error: project tools are available only after selecting a managed project.")
             if self.project_active is False and TOOL_GROUPS.get(call.name) == "project"

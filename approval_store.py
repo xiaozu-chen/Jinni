@@ -1,3 +1,5 @@
+"""Persist reviewed per-tool domain approvals in a small, validated JSON store."""
+
 import ipaddress
 import json
 import os

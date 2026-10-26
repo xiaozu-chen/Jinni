@@ -1,3 +1,5 @@
+"""Render a recorded chart page to PNG with a configured headless browser."""
+
 from __future__ import annotations
 
 import logging

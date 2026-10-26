@@ -1,3 +1,5 @@
+"""Turn proposed memory changes into conservative keep, reject, or merge decisions."""
+
 from datetime import date, timedelta
 
 from memory import MemoryStore, Proposal, Rejected

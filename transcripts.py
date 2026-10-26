@@ -1,3 +1,5 @@
+"""Save and load bounded JSON conversation transcripts inside the active workspace."""
+
 import json
 import re
 from datetime import datetime

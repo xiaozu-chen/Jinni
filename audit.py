@@ -1,3 +1,5 @@
+"""Append redacted tool-call decisions and provide a bounded recent-history view."""
+
 import json
 from datetime import datetime, timezone
 

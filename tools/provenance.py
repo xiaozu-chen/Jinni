@@ -1,3 +1,5 @@
+"""Attach integrity-checked source records to generated CSV files."""
+
 import hashlib
 import json
 import os

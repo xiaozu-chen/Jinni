@@ -1,3 +1,5 @@
+"""Validate MCP table results and save them as provenance-labelled CSV files."""
+
 from __future__ import annotations
 
 import csv
@@ -13,6 +15,7 @@ from tools.web import MAX_TABLE_CSV, MAX_TABLE_ROWS
 
 
 def table_result_csv(result) -> bytes:
+    """Accept one structured table or one JSON text block; reject ambiguous tool output."""
     if getattr(result, "is_error", False):
         raise ValueError("the MCP tool returned an error")
     payload = getattr(result, "structured_content", None)
@@ -63,6 +66,7 @@ def table_result_csv(result) -> bytes:
 
 async def export_mcp_table(manager, server_name: str, tool_name: str,
                            arguments: dict[str, object]) -> str:
+    """Check allowlists, call the server, validate rows, then save CSV with source metadata."""
     server = manager.servers.get(server_name)
     if server is None:
         raise ValueError(f"no MCP server called '{server_name}' is configured")

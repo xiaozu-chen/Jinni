@@ -1,3 +1,5 @@
+"""Embed and search memories, falling back to keyword ranking when the local service is down."""
+
 from __future__ import annotations
 
 import logging
@@ -183,11 +185,12 @@ def rerank(ids: list[int], keyword_ids: list[int], semantic_scores: dict[int, fl
 
 
 def hybrid_search(store: MemoryStore, query: str, limit: int | None = None) -> tuple[list[Memory], str]:
-    """Returns (results, mode). Mode is 'hybrid', or 'keyword' when semantic search is off or down."""
+    """Fuse lexical and vector rankings; return keyword mode if the optional embedder is down."""
     limit = limit or settings.recall_results
     if not query.strip():
         return [], "keyword"
 
+    # Search SQLite first so recall still works when the optional local model is sulking.
     by_keyword = store.search(query, limit * 2)
     by_meaning: list[tuple[int, float]] = []
     mode = "keyword"
@@ -211,6 +214,7 @@ def hybrid_search(store: MemoryStore, query: str, limit: int | None = None) -> t
                     known[memory_id] = found
         keyword_ids = [m.id for m in by_keyword]
         semantic_scores = dict(by_meaning)
+        # Fuse ranks before reranking: candidates must have evidence from either search path.
         ids = fuse([keyword_ids, list(semantic_scores)], limit * 4)
         ids = rerank(ids, keyword_ids, semantic_scores, limit)
         results = [known[i] for i in ids if i in known]

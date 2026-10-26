@@ -1,3 +1,5 @@
+"""Store compact user facts and events in SQLite, with size and duplicate safeguards."""
+
 import re
 import sqlite3
 import threading

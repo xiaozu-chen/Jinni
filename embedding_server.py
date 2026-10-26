@@ -1,3 +1,5 @@
+"""Supervise the optional local embedding process used by semantic memory search."""
+
 from __future__ import annotations
 
 import os

@@ -1,3 +1,5 @@
+"""Run fixed, read-only Python checkers against paths inside the active project."""
+
 import json
 import os
 import shutil

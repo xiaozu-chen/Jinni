@@ -1,3 +1,5 @@
+"""Fetch public pages safely, scope approvals to sites, and extract bounded tables."""
+
 import ipaddress
 import csv
 import io
@@ -227,10 +229,12 @@ def _table_csv(html: str, table_index: int) -> bytes:
     return data
 
 def check_public_url(url: str) -> list[str]:
+    """Resolve every address and reject the URL if even one answer is non-public."""
     parts = urlparse(url)
     if parts.scheme not in ("http", "https") or not parts.hostname:
         raise ValueError("only http and https URLs are allowed")
     addresses = []
+    # Check every DNS answer; a public address mustn't launder a private sibling, nya.
     for info in socket.getaddrinfo(parts.hostname, parts.port, type=socket.SOCK_STREAM):
         try:
             resolved_address = info[4][0]

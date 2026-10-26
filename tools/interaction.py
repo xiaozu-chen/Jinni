@@ -1,3 +1,5 @@
+"""Register user-facing clarification and task-list tools backed by persistent local state."""
+
 from .registry import tool
 import task_store
 from task_store import TaskStore

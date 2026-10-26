@@ -1,3 +1,5 @@
+"""Provide project-confined file discovery, reads, edits, patches, and reversible deletes."""
+
 import ast
 import fnmatch
 import logging
@@ -399,6 +401,7 @@ def edit_file(path: str, old_text: str, new_text: str) -> str:
     group="project",
 )
 def apply_patch(path: str, patches: list[dict[str, str]]) -> str:
+    """Validate all exact source ranges first; replace the file only if every patch fits."""
     try:
         full = safe_path(path)
         if not full.is_file():

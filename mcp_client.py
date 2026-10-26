@@ -1,3 +1,7 @@
+"""Manage allowlisted MCP subprocesses and expose their safe capabilities as Jinni tools.
+
+Each server owns one async connection task; restart, schema checks, and result caps live here."""
+
 from __future__ import annotations
 
 import asyncio
@@ -315,7 +319,10 @@ def register_server_tools(server: Any) -> Registration:
 
 
 class McpServer:
-    """One MCP server. A single long-lived task owns its connection (see the cancel-scope trap)."""
+    """Own one MCP connection task, allowed registrations, and restart lifecycle.
+
+    The task that opens the connection also closes it; MCP transports bind cleanup to that async scope.
+    """
 
     def __init__(self, cfg: McpServerConfig, on_down: Callable[[McpServer], None] | None = None) -> None:
         self.cfg = cfg
@@ -648,6 +655,8 @@ class McpServer:
 
 
 class McpManager:
+    """Start and stop the configured server set and aggregate its registered capabilities."""
+
     def __init__(self, configs: tuple[McpServerConfig, ...], *, auto_restart: bool | None = None,
                  restart_initial_delay: float | None = None,
                  restart_max_delay: float | None = None) -> None:

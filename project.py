@@ -1,3 +1,5 @@
+"""Create managed project copies and preserve reversible Git checkpoints before writes."""
+
 import re
 import shutil
 import os
@@ -63,6 +65,7 @@ def _initialize_project(path: Path, projects_dir: Path) -> None:
 
 
 def checkpoint_before_write(tool_name: str, project_path: str | Path) -> str | None:
+    """Commit the current state before an approved write to give `/undo` a restore point."""
     if tool_name not in CHECKPOINTED_WRITES:
         return None
     root = Path(project_path).expanduser().resolve()
@@ -155,6 +158,7 @@ def select_project(name: str, projects_dir: str | Path) -> Path:
 
 
 def copy_project(source_path: str | Path, projects_dir: str | Path) -> Path:
+    """Copy into managed storage while omitting generated content and all symlinks."""
     source = Path(source_path).expanduser().resolve()
     projects = Path(projects_dir).expanduser().resolve()
     if not source.is_dir():

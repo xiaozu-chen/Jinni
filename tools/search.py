@@ -1,3 +1,5 @@
+"""Expose web search and convert selected search snippets into chartable CSV data."""
+
 import hashlib
 import logging
 import re

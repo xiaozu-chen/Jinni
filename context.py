@@ -1,3 +1,5 @@
+"""Compact old conversation turns while keeping recent context and tool-call pairing."""
+
 from config import settings
 from models import Message
 

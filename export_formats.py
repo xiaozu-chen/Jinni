@@ -1,3 +1,5 @@
+"""Export recorded Jinni charts to standalone SVG or headless-browser PDF."""
+
 from __future__ import annotations
 
 import logging

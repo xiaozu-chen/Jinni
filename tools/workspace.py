@@ -1,3 +1,5 @@
+"""Define the active workspace and centralize safe relative-path handling."""
+
 from pathlib import Path
 
 WORKSPACE = Path("workspace").resolve()

@@ -1,3 +1,5 @@
+"""Track charts Jinni actually created before allowing export or lookup."""
+
 import hashlib
 import hmac
 import json

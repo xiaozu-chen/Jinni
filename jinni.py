@@ -1,3 +1,7 @@
+"""CLI entry point for chat, project selection, settings, and local commands.
+
+Runtime services are assembled once, then input routes to a CLI action or an agent turn."""
+
 import asyncio
 import atexit
 import argparse
@@ -198,6 +202,7 @@ def mcp_restart_target(argument: str) -> str | None:
 
 
 def activate_project(path, agent: Agent) -> str:
+    """Switch workspace-scoped tools and guidance together to one managed project."""
     guidance = project_tools.load_project_guidance(path)
     workspace_tools.WORKSPACE = path
     export_all.WORKSPACE = path
@@ -208,6 +213,7 @@ def activate_project(path, agent: Agent) -> str:
 
 
 def main(argv: list[str] | None = None) -> None:
+    """Load runtime services, route slash commands, and run the interactive chat loop."""
     parser = argparse.ArgumentParser(description="Jinni local AI agent")
     parser.add_argument("--project", help="copy this project into the Jinni workspace before editing")
     args = parser.parse_args(argv)

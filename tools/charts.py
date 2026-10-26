@@ -1,3 +1,5 @@
+"""Validate local tables and turn chosen columns into standalone chart pages."""
+
 import csv
 import io
 import logging

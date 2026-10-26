@@ -1,3 +1,5 @@
+"""Retry transient async failures with capped exponential backoff."""
+
 import logging
 from asyncio import sleep
 from collections.abc import Awaitable, Callable

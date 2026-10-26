@@ -1,3 +1,5 @@
+"""Keep the user's durable task list in a separate, thread-safe SQLite database."""
+
 from __future__ import annotations
 
 import sqlite3

@@ -157,6 +157,7 @@ def _format_result(label: str, code: int, output: str, truncated: bool) -> str:
     group="project",
 )
 def run_tests(path: str = "tests", timeout: int = 120) -> str:
+    """Snapshot the project and run its fixed pytest command inside AppContainer."""
     _validate_timeout(timeout)
     root = _managed_project()
     target = _checked_target(root, path)

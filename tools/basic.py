@@ -1,3 +1,5 @@
+"""Register small deterministic utilities such as calculation and date/time lookup."""
+
 import ast
 import operator
 from datetime import datetime

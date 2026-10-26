@@ -1,3 +1,5 @@
+"""Build bounded human-readable approval previews and preflight Python edits."""
+
 import difflib
 import json
 import ast

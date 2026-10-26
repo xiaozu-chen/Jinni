@@ -1,3 +1,5 @@
+"""Register tool functions, model schemas, approval policy, and project visibility."""
+
 import inspect
 from collections.abc import Callable
 from typing import Any
@@ -33,7 +35,7 @@ def add_tool(name: str,
              approval: bool = False, 
              remember: bool = False,
              group: str = "core") -> None:
-    #
+    """Keep the function, schema, group, and approval sets in sync as one registration."""
     if name in TOOL_FUNCTIONS:
         raise ValueError(f"tool '{name}' is already registered")
     TOOL_FUNCTIONS[name] = fn
@@ -63,7 +65,7 @@ def tool(description: str,
          remember: bool = False, 
          scope: ScopeFn | None = None,
          group: str = "core"):
-    #
+    """Turn a documented Python function into a model-visible schema entry."""
     if remember and not approval:
         raise ValueError("remember=True only make sense together with approval=True")
     if scope and not remember:

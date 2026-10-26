@@ -1,3 +1,5 @@
+"""Define immutable runtime settings and parse validated TOML overrides."""
+
 import os
 import tomllib
 from dataclasses import dataclass, fields
