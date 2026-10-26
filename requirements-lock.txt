@@ -29,6 +29,7 @@ pluggy==1.7.0
 primp==2.0.1
 pycparser==3.12
 pyreadline3==3.5.6
+publicsuffixlist==1.1.2.20261023
 pydantic==2.14.1
 pydantic_core==2.50.1
 Pygments==2.21.0

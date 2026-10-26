@@ -4,11 +4,13 @@ import io
 import logging
 import re
 import socket
+from functools import lru_cache
 from html.parser import HTMLParser
 from urllib.parse import urljoin, urlparse, urlunsplit
 from typing import Any
 
 import httpx
+from publicsuffixlist import PublicSuffixList
 
 from .registry import tool
 from .provenance import write_csv_provenance
@@ -24,6 +26,43 @@ MAX_TRUSTED_URLS = 500
 URL_PATTERN = re.compile(r"https?://[^\s<>\"']+", re.IGNORECASE)
 TRUSTED_URLS: set[str] = set()
 log = logging.getLogger("jinni.tools.web")
+
+
+@lru_cache(maxsize=1)
+def _public_suffixes() -> PublicSuffixList:
+    return PublicSuffixList()
+
+
+def _pinned_target(url: str, addresses: list[str] | None) -> tuple[str, dict[str, str], dict[str, Any]]:
+    if not addresses:
+        return url, {}, {}
+    parts = urlparse(url)
+    host = parts.hostname or ""
+    try:
+        host_ascii = host.encode("idna").decode("ascii")
+    except UnicodeError:
+        raise ValueError("the hostname is not valid IDNA") from None
+    address = addresses[0]
+    try:
+        parsed_ip = ipaddress.ip_address(address)
+        address = f"[{parsed_ip}]" if parsed_ip.version == 6 else str(parsed_ip)
+    except ValueError:
+        raise ValueError("DNS returned an invalid address") from None
+    port = parts.port
+    netloc = address + (f":{port}" if port is not None else "")
+    pinned_url = urlunsplit((parts.scheme, netloc, parts.path or "/", parts.query, ""))
+    host_header = f"[{host_ascii}]" if ":" in host_ascii else host_ascii
+    if port is not None:
+        host_header += f":{port}"
+    extensions: dict[str, Any] = {}
+    if parts.scheme == "https":
+        extensions["sni_hostname"] = host_ascii
+    return pinned_url, {"Host": host_header}, extensions
+
+
+def _stream(client: httpx.Client, url: str, addresses: list[str] | None):
+    target, headers, extensions = _pinned_target(url, addresses)
+    return client.stream("GET", target, headers=headers, extensions=extensions)
 
 
 def _estimate_tokens(text: str) -> int:
@@ -132,11 +171,11 @@ class TableExtractor(HTMLParser):
 
 def _fetch_html(url: str) -> str:
     origin = host_scope({"url": url})
-    with httpx.Client(timeout=10, follow_redirects=False,
+    with httpx.Client(timeout=10, follow_redirects=False, trust_env=False,
                       headers={"User-Agent": "Jinni/0.1"}) as client:
         for _ in range(4):
-            check_public_url(url)
-            with client.stream("GET", url) as response:
+            addresses = check_public_url(url)
+            with _stream(client, url, addresses) as response:
                 if response.is_redirect:
                     location = response.headers.get("location")
                     if not location:
@@ -184,30 +223,44 @@ def _table_csv(html: str, table_index: int) -> bytes:
         raise ValueError("the extracted table is too large to save")
     return data
 
-def check_public_url(url: str) -> None:
+def check_public_url(url: str) -> list[str]:
     parts = urlparse(url)
     if parts.scheme not in ("http", "https") or not parts.hostname:
         raise ValueError("only http and https URLs are allowed")
-    for info in socket.getaddrinfo(parts.hostname, None):
+    addresses = []
+    for info in socket.getaddrinfo(parts.hostname, parts.port, type=socket.SOCK_STREAM):
         ip = ipaddress.ip_address(info[4][0].split("%")[0])
         if not ip.is_global:
             raise ValueError("that address is private or local, which is not allowed")
+        rendered = str(ip)
+        if rendered not in addresses:
+            addresses.append(rendered)
+    if not addresses:
+        raise ValueError("the hostname did not resolve to a public address")
+    return addresses
 
 def host_scope(args: dict[str, Any]) -> str:
     try:
         host = urlparse(str(args.get("url", ""))).hostname or ""
     except ValueError:
         return ""
-    return host.lower().rstrip(".").removeprefix("www.")
+    host = host.lower().rstrip(".").removeprefix("www.")
+    try:
+        return str(ipaddress.ip_address(host))
+    except ValueError:
+        try:
+            return _public_suffixes().privatesuffix(host) or host
+        except (UnicodeError, ValueError):
+            return host
 
 
 def _fetch_page(url: str) -> tuple[str, str]:
     origin = host_scope({"url": url})
-    with httpx.Client(timeout=10, follow_redirects=False,
+    with httpx.Client(timeout=10, follow_redirects=False, trust_env=False,
                       headers={"User-Agent": "Jinni/0.1"}) as client:
         for _ in range(4):
-            check_public_url(url)
-            with client.stream("GET", url) as response:
+            addresses = check_public_url(url)
+            with _stream(client, url, addresses) as response:
                 if response.is_redirect:
                     location = response.headers.get("location")
                     if not location:

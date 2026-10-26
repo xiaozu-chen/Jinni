@@ -224,7 +224,27 @@ def test_url_check_blocks_private_and_odd(url):
 
 
 def test_url_check_allows_public_ip():
-    check_public_url("http://8.8.8.8")
+    assert check_public_url("http://8.8.8.8") == ["8.8.8.8"]
+
+
+def test_url_check_rejects_a_mixed_public_and_private_dns_answer(monkeypatch):
+    monkeypatch.setattr(web.socket, "getaddrinfo", lambda *args, **kwargs: [
+        (2, 1, 6, "", ("8.8.8.8", 443)),
+        (2, 1, 6, "", ("127.0.0.1", 443)),
+    ])
+
+    with pytest.raises(ValueError, match="private or local"):
+        check_public_url("https://rebound.example")
+
+
+def test_pinned_target_preserves_http_host_and_tls_name():
+    target, headers, extensions = web._pinned_target(
+        "https://example.com:8443/path?q=1", ["8.8.8.8"]
+    )
+
+    assert target == "https://8.8.8.8:8443/path?q=1"
+    assert headers == {"Host": "example.com:8443"}
+    assert extensions == {"sni_hostname": "example.com"}
 
 
 def test_fetch_refuses_localhost():
@@ -310,7 +330,7 @@ def test_fetch_table_blocks_cross_site_redirects(monkeypatch):
         def __exit__(self, *args):
             return False
 
-        def stream(self, method, url):
+        def stream(self, method, url, **kwargs):
             class Context:
                 def __enter__(self):
                     return Response()
@@ -331,6 +351,7 @@ def test_fetch_table_blocks_cross_site_redirects(monkeypatch):
     ("https://mayoclinic.org./a", "mayoclinic.org"),
     ("https://good.example@evil.example/", "evil.example"),
     ("https://user.github.io/x", "user.github.io"),
+    ("https://docs.shop.example.co.uk/x", "example.co.uk"),
     ("not a url", ""),
     ("http://[bad", ""),
 ])
@@ -386,7 +407,7 @@ def _web_client(responses, calls=None):
         def __exit__(self, *args):
             return False
 
-        def stream(self, method, url):
+        def stream(self, method, url, **kwargs):
             calls.append(url)
             response = responses.pop(0)
 
