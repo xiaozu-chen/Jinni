@@ -190,6 +190,8 @@ automatically. Sources of taint: `fetch_url`, `web_search`, any MCP tool, and `r
 come from sessions that contained web text). A fresh conversation clears it. Open question: should reading
 files copied in from outside also taint?
 
+Subagent results must inherit session taint when this mechanism is built.
+
 **Safeguards for the mode itself:**
 
 - [ ] Only the user can enable it, with a CLI command the model never sees. The warning text comes from our code, not the model.

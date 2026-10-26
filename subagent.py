@@ -222,8 +222,11 @@ async def run_subagent(task: str) -> str:
         verified = int(pointer_counts.group(1)) if pointer_counts else 0
         dropped = int(pointer_counts.group(2)) if pointer_counts else 0
         metrics.update({"laps": laps, "total_tokens": tokens, "verified": verified, "dropped": dropped})
-        log.info("subagent %s task=%r laps=%d tokens=%d tools=%s outcome=%s", run_id,
-                 clean_task[:200], laps, tokens, ",".join(metrics.get("tools", [])), outcome)
+        log.info(
+            "subagent %s task=%r laps=%d tokens=%d tools=%s verified=%d dropped=%d outcome=%s",
+            run_id, clean_task[:200], laps, tokens, ",".join(metrics.get("tools", [])),
+            verified, dropped, outcome,
+        )
         print(f"  [subagent {run_id}] {laps} laps, {tokens} tokens, "
               f"{time.perf_counter() - started:.1f}s, {pointers} pointers")
         return result
