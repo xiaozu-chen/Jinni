@@ -72,6 +72,7 @@ def help_text() -> str:
   /help              show this list
   /config            show effective settings (sensitive values are hidden)
   /undo              remove the latest chat turn from conversation history
+  /project [NAME]    list projects or switch to a managed project
   /think             toggle model reasoning display
   /parallel          toggle parallel tool calls
   /tools             list available tools
@@ -160,16 +161,26 @@ def mcp_restart_target(argument: str) -> str | None:
     return target.strip() if separator else ""
 
 
+def activate_project(path, agent: Agent) -> str:
+    guidance = project_tools.load_project_guidance(path)
+    workspace_tools.WORKSPACE = path
+    export_all.WORKSPACE = path
+    agent.project_guidance = guidance
+    agent.apply_memory()
+    return f"(active project: {path.name})"
+
+
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description="Jinni local AI agent")
     parser.add_argument("--project", help="copy this project into the Jinni workspace before editing")
     args = parser.parse_args(argv)
 
     active_workspace = workspace_tools.WORKSPACE
+    projects_dir = active_workspace / "projects"
     if args.project:
         try:
             active_workspace = project_tools.copy_project(
-                args.project, workspace_tools.WORKSPACE / "projects"
+                args.project, projects_dir
             )
         except (OSError, ValueError) as error:
             parser.error(str(error))
@@ -229,6 +240,25 @@ def main(argv: list[str] | None = None) -> None:
                     continue
                 if cmd == "/undo":
                     print(undo_last_turn(agent))
+                    continue
+                if cmd == "/project":
+                    if not arg.strip() or arg.strip() == "list":
+                        projects = project_tools.list_projects(projects_dir)
+                        active = workspace_tools.WORKSPACE.resolve()
+                        print("  Projects:")
+                        if not projects:
+                            print("    (none yet)")
+                        for path in projects:
+                            marker = " *" if path.resolve() == active else ""
+                            print(f"    {path.name}{marker}")
+                    else:
+                        try:
+                            path = project_tools.select_project(
+                                arg.strip(), projects_dir
+                            )
+                            print(f"  {activate_project(path, agent)}")
+                        except (OSError, ValueError) as error:
+                            print(f"  (project switch failed: {error})")
                     continue
                 if cmd == "/think":
                     agent.thinking_on = not agent.thinking_on

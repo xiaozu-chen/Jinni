@@ -114,6 +114,14 @@ def test_invalid_python_patch_is_rejected_before_approval(workspace, monkeypatch
     assert (workspace / "module.py").read_text(encoding="utf-8") == "def answer():\n    return 42\n"
 
 
+def test_tools_cannot_access_project_control_files(workspace):
+    from tools.workspace import safe_path
+
+    for path in (".git/config", "nested/.jinni/managed-project"):
+        with pytest.raises(ValueError, match="control files"):
+            safe_path(path)
+
+
 def test_remembered_approval_is_marked_auto(monkeypatch):
     trust_urls_from_text("https://example.com/one https://example.com/two")
     monkeypatch.setattr("builtins.input", lambda _: "a")

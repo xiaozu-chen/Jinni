@@ -15,7 +15,10 @@ def was_written(path: Path) -> bool:
 
 def safe_path(path: str) -> Path:
     WORKSPACE.mkdir(exist_ok=True)
-    full = (WORKSPACE / path).resolve()
+    requested = Path(path)
+    if any(part.lower() in {".git", ".jinni"} for part in requested.parts):
+        raise ValueError("project control files are not accessible to tools")
+    full = (WORKSPACE / requested).resolve()
     if not full.is_relative_to(WORKSPACE):
         raise ValueError("path is outside the workspace")
     return full
