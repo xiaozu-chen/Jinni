@@ -44,6 +44,8 @@ Use `/replay start NAME` to record model requests and expected tool choices loca
 
 With a managed project selected, Jinni also offers `search_workspace_files` for semantic search across bounded, readable project files. It skips generated and secret files, reports source line ranges, and falls back to keyword matching if the embedding service is unavailable.
 
+Run `python coding_eval.py --models qwen3.5 --thinking off,on --tool-counts 3,all` to compare small scratch-project edits. The five cases use file-only tools and static source checks; model-generated code is never executed by the evaluator.
+
 Jinni only fetches URLs that the user supplied or that appeared in a web-search result during the session. The existing per-domain approval still applies.
 
 ## Memory maintenance
