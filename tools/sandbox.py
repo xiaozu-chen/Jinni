@@ -242,9 +242,15 @@ def run_isolated(
         str((cwd.resolve() / name)) for name in (".git", ".jinni")
         if (cwd / name).exists()
     )
+    scratch_root = temp_dir.resolve()
+    if scratch_root == Path(scratch_root.anchor):
+        raise ValueError("the sandbox scratch folder cannot be a filesystem root")
+    # Parent temp folders often grant AppContainer access through inherited Windows ACLs.
+    # Deny siblings explicitly while the exact scratch folder remains allowlisted, nya.
+    deny_paths = (*control_paths, *deny, str(scratch_root.parent))
     spec = sandbox_spec(
         (str(cwd.resolve()), str(temp_dir.resolve()), str(appcontainer_temp.resolve()), *read_write),
-        read_only, (*control_paths, *deny), capabilities, disallow_win32k,
+        read_only, deny_paths, capabilities, disallow_win32k,
     )
     spec_buffer = ctypes.create_string_buffer(spec)
     startup, info = _StartupInfo(), _ProcessInformation()
