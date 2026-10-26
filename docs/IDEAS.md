@@ -113,8 +113,8 @@ The real answer is **isolation**.
 
 ### 4.6 Tier C and D: running things
 
-- [ ] **`run_tests`**: fixed command, validated arguments, working folder pinned to the project, scrubbed environment, timeout, output cap. Runs **inside isolation**. _[M / high]_
-- [ ] **Free-form PowerShell**: only inside isolation, network off, folder mapped, off by default. _[M / high]_
+- [x] **`run_tests`**: fixed pytest command, project-scoped paths, scrubbed environment, timeout, output cap, and no-network AppContainer isolation. _[M / high]_
+- [x] **Free-form PowerShell**: project-scoped, approved, no-network AppContainer execution; disabled by default with `powershell_enabled`. _[M / high]_
 - [ ] **No `pip install`** on the host. Installs run arbitrary setup code, so inside isolation only.
 
 **Why a shell is different from every other tool:** all our protections look at a path or a URL, and a

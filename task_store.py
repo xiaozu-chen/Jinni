@@ -6,7 +6,6 @@ from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
 
-from tools import workspace
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS tasks (
@@ -96,6 +95,8 @@ _stores_lock = threading.Lock()
 
 
 def get_store() -> TaskStore:
+    from tools import workspace
+
     path = (workspace.WORKSPACE / ".jinni" / "tasks.sqlite3").resolve()
     with _stores_lock:
         if path not in _stores:

@@ -27,7 +27,7 @@ from agent_events import AgentEvent, EventSink
 log = logging.getLogger("jinni.agent")
 CHECKPOINTED_WRITES = {
     "write_file", "edit_file", "apply_patch", "delete_file", "make_chart", "fetch_table",
-    "search_snippets_for_chart",
+    "search_snippets_for_chart", "run_powershell",
 }
 RETRYABLE = (openai.APIConnectionError, openai.InternalServerError)
 DECLINED = "The user declined this action. It was their choice, not a technical error. Do not retry; ask what they want instead."

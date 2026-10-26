@@ -93,6 +93,9 @@ class Settings:
     mcp_restart_initial_delay: float = 1.0
     mcp_restart_max_delay: float = 30.0
 
+    # Project execution (PowerShell remains opt-in; both tools require isolation)
+    powershell_enabled: bool = False
+
     # PNG export (uses an installed Edge or Chrome, headless)
     browser_path: str = ""
     png_theme: str = "light"

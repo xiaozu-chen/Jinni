@@ -20,6 +20,7 @@ mcp_servers_file = "mcp_servers.json"
 mcp_auto_restart = true
 mcp_restart_initial_delay = 1.0
 mcp_restart_max_delay = 30.0
+powershell_enabled = false
 png_theme = "light"
 png_width = 1280
 png_height = 720
