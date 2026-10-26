@@ -20,7 +20,7 @@ from thinking_classifier import (
     THINKING_CLASSIFIER_PROMPT, THINKING_CLASSIFIER_SCHEMA, parse_thinking_label,
 )
 from tools import TOOL_FUNCTIONS, REMEMBERABLE, SCOPES, NEEDS_APPROVAL, tool_names, tool_schemas
-from tools.registry import TOOL_GROUPS, WORKSPACE_READ_TOOLS
+from tools.registry import TOOL_GROUPS
 from tools.web import is_trusted_url, trust_urls_from_text
 import memory
 from memory import MemoryStore, Proposal, extraction_prompt, parse_proposals
@@ -41,17 +41,17 @@ CHECKPOINTED_WRITES = {
 RETRYABLE = (openai.APIConnectionError, openai.InternalServerError)
 DECLINED = "The user declined this action. It was their choice, not a technical error. Do not retry; ask what they want instead."
 WORKSPACE_FILE_GUIDANCE = (
-    "Local files: For requests to inspect, compare, list, or chart local files, search the "
-    "Jinni workspace first with find_files or list_files, then read matching files with "
-    "read_file. For an inventory use find_files(pattern='**/*'); for CSV discovery use "
-    "find_files(pattern='*.csv'). If the user names files to compare, read each named file "
-    "and compare them; do not ask what they want done when they already said compare. "
-    "Use web_search only for online research, never for local file discovery. Use recall "
-    "only for saved memories from earlier sessions, never to locate files. Use ask_user only "
-    "when a missing detail prevents an action, not to ask whether you can inspect files. "
-    "This CLI cannot see files attached to a separate chat. If workspace search finds no "
-    "match, say that you checked the workspace and ask for a path or for the file to be "
-    "copied there. Never claim to have checked without actually searching."
+    "Local files: When a managed project is active, use find_files or list_files to search "
+    "that project's workspace before answering local-file requests, then use read_file to "
+    "inspect matching files. For an inventory use find_files(pattern='**/*'); for CSV "
+    "discovery use find_files(pattern='*.csv'). If the user names files to compare, read "
+    "each named file and compare them; do not ask what they want done when they already "
+    "said compare. Use web_search only for online research, never for local file discovery. "
+    "Use recall only for saved memories from earlier sessions, never to locate files. Use "
+    "ask_user only when a missing detail prevents an action. With no active project, ask "
+    "the user to select a project in the frontend; do not claim to search files or see chat "
+    "attachments. If project search finds no match, say that you checked and ask for a path. "
+    "Never claim to have checked without actually searching."
 )
 
 def authorize(
@@ -286,8 +286,7 @@ class Agent:
             (None, "Error: that tool is not available to a subagent.")
             if self.tool_menu is not None and call.name not in self.tool_menu
             else (None, "Error: project tools are available only after selecting a managed project.")
-            if (self.project_active is False and TOOL_GROUPS.get(call.name) == "project"
-                and call.name not in WORKSPACE_READ_TOOLS)
+            if self.project_active is False and TOOL_GROUPS.get(call.name) == "project"
             else authorize(call, self.allowed, self.emit)
             for call in calls
         ]

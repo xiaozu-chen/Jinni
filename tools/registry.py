@@ -10,10 +10,6 @@ NEEDS_APPROVAL: set[str] = set()
 REMEMBERABLE: set[str] = set()
 TOOL_GROUPS: dict[str, str] = {}
 SUBAGENT_SAFE: set[str] = set()
-WORKSPACE_READ_TOOLS = {
-    "list_files", "read_file", "search_files", "find_files", "code_outline",
-    "project_tree", "search_workspace_files",
-}
 
 ScopeFn = Callable[[dict[str, Any]], str]
 SCOPES: dict[str, ScopeFn] = {}
@@ -24,9 +20,7 @@ JSON_TYPES = {str: "string", int: "integer", float: "number", bool: "boolean"}
 def tool_names(project_active: bool | None = None) -> set[str]:
     return {
         name for name in TOOL_FUNCTIONS
-        if project_active is not False
-        or TOOL_GROUPS.get(name, "core") != "project"
-        or name in WORKSPACE_READ_TOOLS
+        if project_active is not False or TOOL_GROUPS.get(name, "core") != "project"
     }
 
 
