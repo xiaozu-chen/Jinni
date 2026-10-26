@@ -11,7 +11,7 @@ from types import SimpleNamespace
 
 from memory.memory import Proposal
 
-from runtime.agent import Agent, authorize, execute
+from runtime.agent import Agent, _streamed_change_counts, authorize, execute
 from runtime.agent_events import AgentEvent
 from context.models import ToolCall
 from tools import TOOL_FUNCTIONS
@@ -116,6 +116,140 @@ def test_turn_reports_automatic_manual_and_default_thinking_modes(monkeypatch):
     assert "  (thinking: off; classified)" in statuses
     assert "  (thinking: on; manual)" in statuses
     assert "  (thinking: off)" in statuses
+
+
+def test_streamed_file_change_counts():
+    assert _streamed_change_counts("write_file", r'{"content":"first\nsecond') == (2, 0)
+    assert _streamed_change_counts(
+        "edit_file", r'{"old_text":"before\nline","new_text":"after"}',
+    ) == (1, 2)
+    assert _streamed_change_counts(
+        "apply_patch", r'{"patches":[{"old_text":"old\nline","new_text":"new"}]}',
+    ) == (1, 2)
+    assert _streamed_change_counts("read_file", r'{"path":"file.py"}') is None
+
+
+def test_stream_response_emits_sanitized_streamed_action_counts(monkeypatch):
+    events = []
+    agent = Agent(event_sink=events.append)
+
+    class Stream:
+        def __init__(self):
+            function = lambda name, arguments: SimpleNamespace(name=name, arguments=arguments)
+            self.chunks = iter([
+                SimpleNamespace(
+                    usage=None,
+                    choices=[SimpleNamespace(delta=SimpleNamespace(
+                        reasoning_content=None,
+                        content=None,
+                        tool_calls=[SimpleNamespace(
+                            index=0,
+                            id="call-1",
+                            function=function("write_file", r'{"path":"file.py","content":"one\n'),
+                        )],
+                    ))],
+                ),
+                SimpleNamespace(
+                    usage=None,
+                    choices=[SimpleNamespace(delta=SimpleNamespace(
+                        reasoning_content=None,
+                        content=None,
+                        tool_calls=[SimpleNamespace(
+                            index=0,
+                            id=None,
+                            function=function(None, r'two"}'),
+                        )],
+                    ))],
+                ),
+            ])
+
+        def __aiter__(self):
+            return self
+
+        async def __anext__(self):
+            try:
+                return next(self.chunks)
+            except StopIteration:
+                raise StopAsyncIteration
+
+        async def close(self):
+            pass
+
+    async def fake_request(self, **kwargs):
+        return Stream()
+
+    monkeypatch.setattr(Agent, "request", fake_request)
+
+    _, calls, _ = asyncio.run(agent.stream_response())
+    progress = [event for event in events if event.kind == "action_stream"]
+
+    assert len(calls) == 1
+    assert [event.details["added"] for event in progress] == [1, 2]
+    assert all(event.details["deleted"] == 0 for event in progress)
+    assert all(event.details["call_id"] == "call-1" for event in progress)
+    assert all("arguments" not in event.details for event in progress)
+
+
+def test_responder_uses_agent_context_and_streams_user_facing_text(monkeypatch):
+    events = []
+    requests = []
+    agent = Agent(event_sink=events.append)
+    agent.messages.extend([
+        {"role": "user", "content": "Update the file."},
+        {"role": "assistant", "content": "", "tool_calls": [{
+            "id": "call-1",
+            "type": "function",
+            "function": {"name": "write_file", "arguments": '{"path":"file.py"}'},
+        }]},
+        {"role": "tool", "tool_call_id": "call-1", "content": "Wrote 12 characters to file.py"},
+    ])
+
+    class Stream:
+        def __init__(self):
+            self.chunks = iter([
+                SimpleNamespace(
+                    usage=None,
+                    choices=[SimpleNamespace(delta=SimpleNamespace(content="Updated " + "file."))],
+                ),
+                SimpleNamespace(
+                    usage=SimpleNamespace(prompt_tokens=50, completion_tokens=3),
+                    choices=[],
+                ),
+            ])
+
+        def __aiter__(self):
+            return self
+
+        async def __anext__(self):
+            try:
+                return next(self.chunks)
+            except StopIteration:
+                raise StopAsyncIteration
+
+        async def close(self):
+            pass
+
+    async def fake_request(self, **kwargs):
+        requests.append(kwargs)
+        return Stream()
+
+    monkeypatch.setattr(Agent, "request", fake_request)
+
+    reply = asyncio.run(agent.respond_after_work("The write succeeded."))
+
+    assert reply == "Updated file."
+    assert requests[0]["model"] == agent_mod.settings.model
+    assert requests[0]["stream"] is True
+    assert "Responder" in requests[0]["messages"][0]["content"]
+    assert requests[0]["messages"][-1] == {
+        "role": "assistant",
+        "content": "The write succeeded.",
+    }
+    assert requests[0]["messages"][3]["role"] == "tool"
+    assert "tools" not in requests[0]
+    assert [event.kind for event in events] == [
+        "responder_start", "text_delta", "status", "text_end",
+    ]
 
 
 def test_unknown_tool():
@@ -310,7 +444,7 @@ def test_cancel_rolls_back_the_turn(monkeypatch):
 def test_failure_after_tool_lap_rolls_back_whole_turn(monkeypatch):
     laps = iter([("", [ToolCall(id="1", name="get_current_time", arguments="{}")], 100)])
 
-    async def flaky(self):
+    async def flaky(self, **kwargs):
         try:
             return next(laps)
         except StopIteration:
@@ -504,17 +638,55 @@ def test_step_limit_offers_to_continue(monkeypatch):
     ])
     calls = []
 
-    async def fake_stream(self):
+    async def fake_stream(self, **kwargs):
         calls.append(True)
         return next(responses)
 
+    async def fake_responder(self, draft):
+        return draft
+
     monkeypatch.setattr(Agent, "stream_response", fake_stream)
+    monkeypatch.setattr(Agent, "respond_after_work", fake_responder)
     agent = Agent()
 
     asyncio.run(agent.chat("continue please"))
 
     assert len(calls) == 2
     assert agent.messages[-1] == {"role": "assistant", "content": "finished"}
+
+
+def test_turn_uses_responder_after_tool_work(monkeypatch):
+    responses = iter([
+        ("", [make_call("get_current_time", {})], 10),
+        ("The requested work is complete.", [], 12),
+    ])
+    drafts = []
+    stream_options = []
+
+    async def fake_stream(self, **kwargs):
+        stream_options.append(kwargs)
+        return next(responses)
+
+    async def fake_tools(self, calls):
+        return ["Tool completed the requested work."]
+
+    async def fake_responder(self, draft):
+        drafts.append(draft)
+        return "I completed the requested work."
+
+    monkeypatch.setattr(Agent, "stream_response", fake_stream)
+    monkeypatch.setattr(Agent, "run_tools", fake_tools)
+    monkeypatch.setattr(Agent, "respond_after_work", fake_responder)
+    agent = Agent()
+
+    asyncio.run(agent.chat("Please do the work."))
+
+    assert stream_options == [{}, {"emit_text": False}]
+    assert drafts == ["The requested work is complete."]
+    assert agent.messages[-1] == {
+        "role": "assistant",
+        "content": "I completed the requested work.",
+    }
 
 
 def test_start_subtask_keeps_a_short_reference_and_resets_history(monkeypatch, memory_store):
@@ -565,7 +737,11 @@ def test_step_limit_stops_when_user_says_no(monkeypatch, capsys):
         calls.append(True)
         return "", [make_call("get_current_time", {})], 10
 
+    async def fake_responder(self, draft):
+        return "I completed the available work."
+
     monkeypatch.setattr(Agent, "stream_response", fake_stream)
+    monkeypatch.setattr(Agent, "respond_after_work", fake_responder)
     events: list[AgentEvent] = []
     agent = Agent(event_sink=events.append)
 
@@ -574,4 +750,7 @@ def test_step_limit_stops_when_user_says_no(monkeypatch, capsys):
     assert len(calls) == 1
     assert "stopped at the step limit" in "\n".join(event.text for event in events)
     assert capsys.readouterr().out == ""
-    assert agent.messages[-1]["role"] == "tool"
+    assert agent.messages[-1] == {
+        "role": "assistant",
+        "content": "I completed the available work.",
+    }

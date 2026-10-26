@@ -10,7 +10,7 @@ from typing import Any
 @dataclass(frozen=True)
 class McpServerConfig:
     name: str
-    command: str
+    command: str = ""
     args: tuple[str, ...] = ()
     env: tuple[tuple[str, str], ...] = ()
     tools: tuple[str, ...] = ()         # allowlist: tools not listed here never reach the model
@@ -19,6 +19,8 @@ class McpServerConfig:
     prompts: tuple[str, ...] = ()       # explicit prompt-name allowlist
     call_timeout: float = 30.0
     mode: str = "auto"                  # "legacy" pins the old protocol if a server misbehaves
+    url: str = ""
+    headers: tuple[tuple[str, str], ...] = ()
 
 
 
@@ -32,7 +34,7 @@ class Settings:
     system_prompt: str = "You are Jinni, a helpful local AI agent. Keep answers concise."
     max_steps: int = 8
     thinking_default: bool = False
-    thinking_classifier_model: str = ""
+    thinking_classifier_model: str = "smolLM2"
     thinking_classifier_base_url: str = "http://127.0.0.1:8082/v1"
     thinking_classifier_timeout: float = 3.0
 

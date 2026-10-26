@@ -12,6 +12,8 @@ data/logs/*.jsonl
 data/memory/memory.db
 data/memory/memory.txt
 data/mcp_servers.json
+data/web_sessions.json
+data/web_sessions.json.tmp
 freeze-*.txt
 settings.toml
 build/

@@ -37,10 +37,19 @@ You can instead configure `embed_server_command` and `embed_server_args` so Jinn
 From the repository root:
 
 ```powershell
-jinni
+python main.py --run-as cli
 ```
 
 Or run `python -m interface.cli.jinni`. Type `exit` to leave. `/help` lists the CLI commands. Use `/project PATH` to work on a managed copy of a repository; without a selected project, Jinni uses its regular `workspace` folder.
+
+To run the web API instead, install its dependencies and start it with:
+
+```powershell
+python -m pip install -r requirements-web.txt
+python main.py --run-as web
+```
+
+The API listens on `127.0.0.1:8765`; the web interface is maintained separately. See [WEB_API.md](docs/WEB_API.md).
 
 See [the command reference](docs/COMMANDS.md) for every slash command and common project command.
 

@@ -9,7 +9,7 @@ from settings.config import McpServerConfig
 
 MAX_CONFIG_BYTES = 100_000
 NAME_PATTERN = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
-ALLOWED_FIELDS = {"name", "command", "args", "env", "tools", "remember", "resources", "prompts", "call_timeout", "mode"}
+ALLOWED_FIELDS = {"name", "command", "args", "env", "tools", "remember", "resources", "prompts", "call_timeout", "mode", "url", "headers"}
 
 
 def _string_list(value, field: str, server_index: int) -> tuple[str, ...]:
@@ -39,7 +39,10 @@ def load_mcp_servers(path: Path | str) -> tuple[McpServerConfig, ...]:
         name, command = item.get("name"), item.get("command")
         if not isinstance(name, str) or not NAME_PATTERN.fullmatch(name) or name in names:
             raise ValueError(f"server {index}: name must be unique and use letters, numbers, '_' or '-'")
-        if not isinstance(command, str) or not command.strip() or len(command) > 512:
+        url = item.get("url", "")
+        if url and (not isinstance(url, str) or not url.startswith(("http://", "https://")) or len(url) > 2048):
+            raise ValueError(f"server {index}: url must be an http or https URL")
+        if not url and (not isinstance(command, str) or not command.strip() or len(command) > 512):
             raise ValueError(f"server {index}: command must contain 1 to 512 characters")
         args = _string_list(item.get("args", []), "args", index)
         tools = _string_list(item.get("tools", []), "tools", index)
@@ -54,6 +57,12 @@ def load_mcp_servers(path: Path | str) -> tuple[McpServerConfig, ...]:
             for key, value in env.items()
         ):
             raise ValueError(f"server {index}: env must map strings to strings")
+        headers = item.get("headers", {})
+        if not isinstance(headers, dict) or any(
+            not isinstance(key, str) or not key or not isinstance(value, str)
+            for key, value in headers.items()
+        ):
+            raise ValueError(f"server {index}: headers must map strings to strings")
         timeout = item.get("call_timeout", 30.0)
         if isinstance(timeout, bool) or not isinstance(timeout, (int, float)) or not math.isfinite(timeout) or not 0.1 <= timeout <= 300:
             raise ValueError(f"server {index}: call_timeout must be between 0.1 and 300 seconds")
@@ -71,6 +80,8 @@ def load_mcp_servers(path: Path | str) -> tuple[McpServerConfig, ...]:
             prompts=prompts,
             call_timeout=float(timeout),
             mode=mode,
+            url=url,
+            headers=tuple(headers.items()),
         ))
         names.add(name)
     return tuple(servers)

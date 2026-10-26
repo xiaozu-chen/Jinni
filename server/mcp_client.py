@@ -14,6 +14,7 @@ import shutil
 import sys
 import webbrowser
 from collections.abc import Callable
+from contextlib import AsyncExitStack
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -361,22 +362,40 @@ class McpServer:
             except ImportError as e:
                 raise RuntimeError('the MCP SDK is not installed: pip install "mcp>=2,<3"') from e
 
-            exe = find_command(self.cfg.command)
-            if exe is None:
-                raise FileNotFoundError(f"command '{self.cfg.command}' not found in this environment")
-            params = sdk.StdioServerParameters(
-                command=exe, args=list(self.cfg.args), env=dict(self.cfg.env) or None
-            )
-            log_path = Path("data/logs") / f"mcp-{clean(self.cfg.name)}.log"
-            log_path.parent.mkdir(parents=True, exist_ok=True)
-            errlog = log_path.open("a", encoding="utf-8")
             extra: dict[str, Any] = {} if self.cfg.mode == "auto" else {"mode": self.cfg.mode}
-            async with sdk.Client(
-                sdk.stdio_client(params, errlog=errlog),
-                sampling_callback=self._sampling_callback,
-                elicitation_callback=self._elicitation_callback,
-                **extra,
-            ) as client:
+            http_client = None
+            if self.cfg.url:
+                import httpx2
+                from mcp.client.streamable_http import streamable_http_client
+
+                http_client = httpx2.AsyncClient(headers=dict(self.cfg.headers))
+                transport = streamable_http_client(self.cfg.url, http_client=http_client)
+                client_context = sdk.Client(
+                    transport,
+                    sampling_callback=self._sampling_callback,
+                    elicitation_callback=self._elicitation_callback,
+                    **extra,
+                )
+            else:
+                exe = find_command(self.cfg.command)
+                if exe is None:
+                    raise FileNotFoundError(f"command '{self.cfg.command}' not found in this environment")
+                params = sdk.StdioServerParameters(
+                    command=exe, args=list(self.cfg.args), env=dict(self.cfg.env) or None
+                )
+                log_path = Path("data/logs") / f"mcp-{clean(self.cfg.name)}.log"
+                log_path.parent.mkdir(parents=True, exist_ok=True)
+                errlog = log_path.open("a", encoding="utf-8")
+                client_context = sdk.Client(
+                    sdk.stdio_client(params, errlog=errlog),
+                    sampling_callback=self._sampling_callback,
+                    elicitation_callback=self._elicitation_callback,
+                    **extra,
+                )
+            async with AsyncExitStack() as stack:
+                if http_client is not None:
+                    await stack.enter_async_context(http_client)
+                client = await stack.enter_async_context(client_context)
                 listing = await client.list_tools()
                 self.client = client
                 self.tools = list(listing.tools)

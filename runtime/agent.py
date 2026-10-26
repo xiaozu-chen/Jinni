@@ -41,6 +41,12 @@ CHECKPOINTED_WRITES = {
 }
 RETRYABLE = (openai.APIConnectionError, openai.InternalServerError)
 DECLINED = "The user declined this action. It was their choice, not a technical error. Do not retry; ask what they want instead."
+RESPONDER_ROLE_PROMPT = (
+    "You are Jinni's Responder. The agent's work is complete. Write a concise, user-facing summary "
+    "of what was done and the result, using the conversation, tool results, and agent draft as evidence. "
+    "Be honest about failures or unfinished work. Do not claim actions that are not supported by the "
+    "tool results. Do not call tools or expose hidden reasoning."
+)
 WORKSPACE_FILE_GUIDANCE = (
     "Local files: When a managed project is active, use find_files or list_files to search "
     "that project's workspace before answering local-file requests, then use read_file to "
@@ -54,6 +60,79 @@ WORKSPACE_FILE_GUIDANCE = (
     "attachments. If project search finds no match, say that you checked and ask for a path. "
     "Never claim to have checked without actually searching."
 )
+
+
+def _partial_json_string_at(arguments: str, position: int) -> str | None:
+    while position < len(arguments) and arguments[position].isspace():
+        position += 1
+    if position >= len(arguments) or arguments[position] != ":":
+        return None
+    position += 1
+    while position < len(arguments) and arguments[position].isspace():
+        position += 1
+    if position >= len(arguments) or arguments[position] != '"':
+        return None
+
+    escaped = False
+    end = position + 1
+    while end < len(arguments):
+        char = arguments[end]
+        if escaped:
+            escaped = False
+        elif char == "\\":
+            escaped = True
+        elif char == '"':
+            try:
+                return json.loads(arguments[position:end + 1])
+            except json.JSONDecodeError:
+                return None
+        end += 1
+
+    partial = arguments[position:]
+    if partial.endswith("\\"):
+        return None
+    try:
+        return json.loads(partial + '"')
+    except json.JSONDecodeError:
+        return None
+
+
+def _partial_json_strings(arguments: str, key: str) -> list[str]:
+    marker = json.dumps(key)
+    values = []
+    position = arguments.find(marker)
+    while position >= 0:
+        value = _partial_json_string_at(arguments, position + len(marker))
+        if value is not None:
+            values.append(value)
+        position = arguments.find(marker, position + len(marker))
+    return values
+
+
+def _line_count(text: str) -> int:
+    return len(text.splitlines())
+
+
+def _streamed_change_counts(name: str, arguments: str) -> tuple[int, int] | None:
+    if name == "write_file":
+        contents = _partial_json_strings(arguments, "content")
+        return (sum(_line_count(content) for content in contents), 0)
+    if name == "edit_file":
+        old_texts = _partial_json_strings(arguments, "old_text")
+        new_texts = _partial_json_strings(arguments, "new_text")
+        return (
+            sum(_line_count(text) for text in new_texts),
+            sum(_line_count(text) for text in old_texts),
+        )
+    if name == "apply_patch":
+        old_texts = _partial_json_strings(arguments, "old_text")
+        new_texts = _partial_json_strings(arguments, "new_text")
+        return (
+            sum(_line_count(text) for text in new_texts),
+            sum(_line_count(text) for text in old_texts),
+        )
+    return None
+
 
 def authorize(
     call: ToolCall,
@@ -188,6 +267,7 @@ class Agent:
             "completion_tokens": 0,
             "seconds": 0.0,
         }
+        self.context_used = 0
         self.tool_counts: Counter[str] = Counter()
         self._owns_memory = store is None and no_memory
         self.memory: MemoryStore = (
@@ -204,8 +284,16 @@ class Agent:
             self.events.append(event)
 
     def _approval_input(self, prompt: str) -> str:
+        return self._request_input("approval", prompt.strip(), "")
+
+    def _request_input(self, kind: str, prompt: str, choices: str) -> str:
         if self.interaction_provider:
-            return self.interaction_provider("approval", prompt.strip(), "")
+            return self.interaction_provider(kind, prompt, choices)
+        if kind == "continuation":
+            answer = input(f"{prompt} (y/n) > ").strip().lower()
+            return "continue" if answer == "y" else "abort"
+        if kind == "question" and choices:
+            return input(f"({prompt.lower()} {choices}) > ")
         return input(prompt)
 
     def set_project_active(self, active: bool) -> None:
@@ -243,7 +331,10 @@ class Agent:
                 temperature=0,
                 max_tokens=16,
                 response_format={"type": "json_object"},
-                extra_body={"json_schema": THINKING_CLASSIFIER_SCHEMA},
+                extra_body={
+                    "json_schema": THINKING_CLASSIFIER_SCHEMA,
+                    "chat_template_kwargs": {"enable_thinking": False},
+                },
             )
             selected = parse_thinking_label(response.choices[0].message.content)
             if selected is None:
@@ -316,7 +407,15 @@ class Agent:
             run_parallel = False
 
         async def one(call: ToolCall, args: dict[str, Any] | None, refusal: str) -> str:
+            self.emit(AgentEvent(
+                "action_started", call.name, {"name": call.name, "call_id": call.id},
+            ))
             if args is None:
+                self.emit(AgentEvent(
+                    "action_completed",
+                    call.name,
+                    {"name": call.name, "call_id": call.id, "success": False},
+                ))
                 return refusal
             if call.name in CHECKPOINTED_WRITES:
                 try:
@@ -329,6 +428,11 @@ class Agent:
                     if checkpoint:
                         self.write_checkpoint = checkpoint
                 except (OSError, ValueError) as error:
+                    self.emit(AgentEvent(
+                        "action_completed",
+                        call.name,
+                        {"name": call.name, "call_id": call.id, "success": False},
+                    ))
                     return f"Error: {error}"
             token = USER_INPUT_PROVIDER.set(self.interaction_provider)
             try:
@@ -341,6 +445,11 @@ class Agent:
             name = call.name.lower()
             if name in {"web_search", "search_snippets_for_chart"} or name.endswith("_search_text"):
                 trust_urls_from_text(result)
+            self.emit(AgentEvent(
+                "action_completed",
+                call.name,
+                {"name": call.name, "call_id": call.id, "success": not result.startswith("Error:")},
+            ))
             return result
 
         if run_parallel:
@@ -360,7 +469,7 @@ class Agent:
             self.emit(AgentEvent("status", f"  ({runnable} tool call(s){how}: {time.perf_counter() - start:.1f}s)"))
         return results
 
-    async def stream_response(self) -> tuple[str, list[ToolCall], int]:
+    async def stream_response(self, *, emit_text: bool = True) -> tuple[str, list[ToolCall], int]:
         start = time.perf_counter()
         first: float | None = None
         generated = 0
@@ -377,7 +486,7 @@ class Agent:
         )
 
         content = ""
-        calls: dict[int, dict[str, str]] = {}
+        calls: dict[int, dict[str, Any]] = {}
         used = 0
         thinking = False
 
@@ -405,11 +514,15 @@ class Agent:
                     if thinking:
                         self.emit(AgentEvent("thinking_end"))
                         thinking = False
-                    self.emit(AgentEvent("text_delta", delta.content))
+                    if emit_text:
+                        self.emit(AgentEvent("text_delta", delta.content))
                     content += delta.content
 
                 for tc in delta.tool_calls or []:
-                    slot = calls.setdefault(tc.index, {"id": "", "name": "", "arguments": ""})
+                    slot = calls.setdefault(
+                        tc.index,
+                        {"id": "", "name": "", "arguments": "", "last_progress": None},
+                    )
                     if tc.id:
                         slot["id"] = tc.id
                     if tc.function:
@@ -417,13 +530,25 @@ class Agent:
                             slot["name"] += tc.function.name
                         if tc.function.arguments:
                             slot["arguments"] += tc.function.arguments
+                    if slot["name"]:
+                        counts = _streamed_change_counts(slot["name"], slot["arguments"])
+                        progress = (slot["name"], counts)
+                        if progress != slot["last_progress"]:
+                            details: dict[str, object] = {
+                                "name": slot["name"],
+                                "call_id": slot["id"] or f"call_{tc.index}",
+                            }
+                            if counts is not None:
+                                details["added"], details["deleted"] = counts
+                            self.emit(AgentEvent("action_stream", details=details))
+                            slot["last_progress"] = progress
 
         finally:
             await stream.close()
 
         if thinking:
             self.emit(AgentEvent("thinking_end"))
-        if content:
+        if content and emit_text:
             self.emit(AgentEvent("text_end"))
 
         total = time.perf_counter() - start
@@ -431,6 +556,7 @@ class Agent:
         self.stats["prompt_tokens"] += used
         self.stats["completion_tokens"] += generated
         self.stats["seconds"] += total
+        self.context_used = used
         if first is not None and total > first and generated:
             speed = generated / (total - first)
             self.emit(AgentEvent("status", f"  (first token {first:.1f}s | total {total:.1f}s | {generated} tokens | {speed:.0f} tok/s)"))
@@ -445,6 +571,69 @@ class Agent:
             except OSError as error:
                 log.warning("could not record replay case: %s", type(error).__name__)
         return content, tool_calls, used
+
+    async def respond_after_work(self, draft: str) -> str:
+        response_messages = json.loads(json.dumps(self.messages, ensure_ascii=False))
+        response_messages[0]["content"] = (
+            str(response_messages[0]["content"]) + "\n\n" + RESPONDER_ROLE_PROMPT
+        )
+        if draft.strip():
+            response_messages.append({"role": "assistant", "content": draft})
+
+        self.emit(AgentEvent("responder_start"))
+        start = time.perf_counter()
+        stream = await self.request(
+            model=settings.model,
+            messages=response_messages,
+            stream=True,
+            stream_options={"include_usage": True},
+            extra_body={"chat_template_kwargs": {"enable_thinking": False}},
+        )
+        reply_parts: list[str] = []
+        used = 0
+        generated = 0
+        try:
+            async for chunk in stream:
+                if chunk.usage:
+                    used = chunk.usage.prompt_tokens
+                    generated = chunk.usage.completion_tokens
+                if not chunk.choices:
+                    continue
+                text = chunk.choices[0].delta.content
+                if text:
+                    reply_parts.append(text)
+                    self.emit(AgentEvent("text_delta", text))
+        finally:
+            await stream.close()
+
+        reply = "".join(reply_parts).strip()
+        if not reply:
+            raise RuntimeError("Responder returned an empty response.")
+        self.context_used = used or self.context_used
+        self.stats["prompt_tokens"] += used
+        self.stats["completion_tokens"] += generated
+        self.stats["seconds"] += time.perf_counter() - start
+        context_used = used or self.context_used
+        self.emit(AgentEvent(
+            "status",
+            f"  (context: {context_used}/{settings.context_limit})",
+            {"context_used": context_used, "context_limit": settings.context_limit},
+        ))
+        self.emit(AgentEvent("text_end"))
+        return reply
+
+    async def _append_responder_reply(self, draft: str) -> bool:
+        try:
+            reply = await self.respond_after_work(draft)
+        except Exception as error:
+            log.exception("responder request failed")
+            self.emit(AgentEvent(
+                "status", f"  (responder failed: {type(error).__name__})",
+            ))
+            self.emit(AgentEvent("error", f"Responder failed: {type(error).__name__}"))
+            return False
+        self.messages.append({"role": "assistant", "content": reply})
+        return True
 
     async def summarize_history(self, keep: int = settings.keep_turns) -> bool:
         user_idxs = [i for i, m in enumerate(self.messages) if m["role"] == "user"]
@@ -527,52 +716,68 @@ class Agent:
         log.info("memory extraction reply: %r", reply[:500])
         return parse_proposals(reply)
 
-    async def chat(self, user_text: str) -> None:
+    async def chat(self, user_text: str, *, user_message_preloaded: bool = False) -> None:
         turn_start = len(self.messages)
         self.write_checkpoint = None
         try:
-            await self._turn(user_text)
+            await self._turn(user_text, user_message_preloaded=user_message_preloaded)
         except asyncio.CancelledError:
-            del self.messages[turn_start:]
+            keep_preloaded_user = user_message_preloaded and turn_start < len(self.messages)
+            del self.messages[turn_start + int(keep_preloaded_user):]
             log.info("turn cancelled, rolled back to %d messages", turn_start)
             raise
         
 
-    async def _turn(self, user_text: str) -> None:
+    async def _turn(self, user_text: str, *, user_message_preloaded: bool = False) -> None:
         turn_start = len(self.messages)
         log.info("user: %s", user_text[:200])
         selected = await self.classify_thinking(user_text)
         source = f"; {self.thinking_source}" if self.thinking_source != "default" else ""
         self.emit(AgentEvent("status", f"  (thinking: {'on' if selected else 'off'}{source})"))
         trust_urls_from_text(user_text)
-        self.messages.append({"role": "user", "content": user_text})
+        if not user_message_preloaded:
+            self.messages.append({"role": "user", "content": user_text})
 
         step = 0
+        did_work = False
         step_limit = max(1, settings.max_steps)
         while True:
             if step >= step_limit:
                 try:
-                    answer = input("(hit the step limit. keep going? y/n) > ").strip().lower()
+                    answer = (await asyncio.to_thread(
+                        self._request_input,
+                        "continuation", "Hit the step limit. Continue?", "Continue / Abort",
+                    )).strip().lower()
                 except (EOFError, KeyboardInterrupt):
-                    answer = "n"
-                if answer == "y":
+                    answer = "abort"
+                if answer in {"continue", "y"}:
                     step_limit += max(1, settings.max_steps)
                     self.emit(AgentEvent("status", "  (continuing for another step block)"))
                     continue
                 log.info("hit step limit (%d), user chose stop", step_limit)
                 self.emit(AgentEvent("status", "(stopped at the step limit)"))
+                if did_work:
+                    await self._append_responder_reply("")
                 break
             self.apply_memory()
             try:
-                content, calls, used = await self.stream_response()
+                if did_work:
+                    content, calls, used = await self.stream_response(emit_text=False)
+                else:
+                    content, calls, used = await self.stream_response()
             except Exception as e:
                 log.exception("model request failed")
-                del self.messages[turn_start:]
+                keep_preloaded_user = user_message_preloaded and turn_start < len(self.messages)
+                del self.messages[turn_start + int(keep_preloaded_user):]
                 self.emit(AgentEvent("status", f"\n  (lost the connection to the model: {type(e).__name__}. see {settings.log_file})"))
                 self.emit(AgentEvent("status", "  (that whole turn was dropped, send your message again)"))
                 return
 
-            self.emit(AgentEvent("status", f"  (context: {used}/{settings.context_limit})"))
+            self.emit(AgentEvent(
+                "status",
+                f"  (context: {used}/{settings.context_limit})",
+                {"context_used": used, "context_limit": settings.context_limit},
+            ))
             log.info("lap %d: context %d/%d", step + 1, used, settings.context_limit)
             if used > settings.context_limit * settings.compact_at:
                 n = compact(self.messages)
@@ -587,10 +792,15 @@ class Agent:
                     self.emit(AgentEvent("status", "  (could not summarize, continuing without it)"))
 
             if not calls:
-                log.info("jinni: %s", content[:200])
-                self.messages.append({"role": "assistant", "content": content})
+                if did_work:
+                    if not await self._append_responder_reply(content):
+                        return
+                else:
+                    log.info("jinni: %s", content[:200])
+                    self.messages.append({"role": "assistant", "content": content})
                 return
 
+            did_work = True
             self.messages.append({
                 "role": "assistant",
                 "content": content,
