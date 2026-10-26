@@ -11,7 +11,7 @@ from mcp_config import resolve_mcp_servers
 from logger import setup_logging
 from agent import Agent
 from review import review, review_stale_facts
-from tools import LOAD_ERRORS, NEEDS_APPROVAL, TOOL_FUNCTIONS
+from tools import LOAD_ERRORS, NEEDS_APPROVAL
 from tools.interaction import due_tasks, task_list
 from tools.workspace import find_chart
 from semantic import EmbedError, catch_up, hybrid_search, start_warmup
@@ -73,7 +73,7 @@ def help_text() -> str:
   /help              show this list
   /config            show effective settings (sensitive values are hidden)
   /undo              remove the latest chat turn from conversation history
-  /project [NAME]    list projects or switch to a managed project
+  /project [NAME]    list or switch projects; /project create NAME makes one
   /think             toggle model reasoning display
   /parallel          toggle parallel tool calls
   /tools             list available tools
@@ -177,6 +177,7 @@ def activate_project(path, agent: Agent) -> str:
     export_all.WORKSPACE = path
     agent.project_guidance = guidance
     agent.apply_memory()
+    agent.set_project_active(True)
     return f"(active project: {path.name})"
 
 
@@ -216,7 +217,9 @@ def main(argv: list[str] | None = None) -> None:
         log.warning("plugin skipped: %s", err)
         print(f"  (plugin skipped: {err})")
 
-    agent = Agent(project_guidance=project_guidance, allowed_file=settings.allowed_file)
+    project_active = (active_workspace / ".jinni" / "managed-project").is_file()
+    agent = Agent(project_guidance=project_guidance, allowed_file=settings.allowed_file,
+                  project_active=project_active)
     agent.allowed.update(load_approvals(settings.allowed_file))
     due = due_tasks()
     if due != "(task list is empty)":
@@ -234,7 +237,7 @@ def main(argv: list[str] | None = None) -> None:
         if manager:
             for line in runner.run(manager.start()):
                 print(line)
-        print(f"  ({len(TOOL_FUNCTIONS)} tools loaded)")
+        print(f"  ({len(agent.visible_tool_names())} tools loaded)")
         try:
             while True:
                 user_text = input("you > ").strip()
@@ -264,9 +267,14 @@ def main(argv: list[str] | None = None) -> None:
                             print(f"    {path.name}{marker}")
                     else:
                         try:
-                            path = project_tools.select_project(
-                                arg.strip(), projects_dir
-                            )
+                            project_arg = arg.strip()
+                            if project_arg.lower() == "create":
+                                raise ValueError("usage: /project create NAME")
+                            if project_arg.lower().startswith("create "):
+                                name = project_arg.split(maxsplit=1)[1]
+                                path = project_tools.create_project(name, projects_dir)
+                            else:
+                                path = project_tools.select_project(project_arg, projects_dir)
                             print(f"  {activate_project(path, agent)}")
                         except (OSError, ValueError) as error:
                             print(f"  (project switch failed: {error})")
@@ -280,7 +288,7 @@ def main(argv: list[str] | None = None) -> None:
                     print(f"  (parallel tools: {'on' if agent.parallel_tools else 'off'})")
                     continue
                 if cmd == "/tools":
-                    for name in TOOL_FUNCTIONS:
+                    for name in sorted(agent.visible_tool_names()):
                         print(f"  {name}{'  (asks first)' if name in NEEDS_APPROVAL else ''}")
                     continue
                 if cmd == "/allowed":

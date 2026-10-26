@@ -88,6 +88,7 @@ def _valid_pattern(pattern: str) -> str | None:
 @tool(
     description="List files and folders inside a directory in the workspace folder.",
     params={"path": "Directory path relative to the workspace. Use '.' for the workspace root."},
+    group="project",
 )
 def list_files(path: str = ".") -> str:
     try:
@@ -107,6 +108,7 @@ def list_files(path: str = ".") -> str:
         "start": "Optional first line number (1-based). Leave 0 for the original beginning-of-file read.",
         "end": "Optional last line number (inclusive). Leave 0 to read up to 200 lines from start.",
     },
+    group="project",
 )
 def read_file(path: str, start: int = 0, end: int = 0) -> str:
     try:
@@ -145,6 +147,7 @@ def read_file(path: str, start: int = 0, end: int = 0) -> str:
         "path": "Workspace directory to search, defaulting to the workspace root.",
         "regex": "Set true to treat query as a regular expression; false searches literal text.",
     },
+    group="project",
 )
 def search_files(query: str, path: str = ".", regex: bool = False) -> str:
     if not query.strip():
@@ -206,6 +209,7 @@ def search_files(query: str, path: str = ".", regex: bool = False) -> str:
         "pattern": "Glob such as '*.py' or '**/*.md'.",
         "path": "Workspace directory to search, defaulting to the workspace root.",
     },
+    group="project",
 )
 def find_files(pattern: str, path: str = ".") -> str:
     pattern_error = _valid_pattern(pattern)
@@ -239,6 +243,7 @@ def find_files(pattern: str, path: str = ".") -> str:
 @tool(
     description="Show classes and functions declared in a Python file, with line numbers.",
     params={"path": "Python file path relative to the workspace."},
+    group="project",
 )
 def code_outline(path: str) -> str:
     try:
@@ -271,6 +276,7 @@ def code_outline(path: str) -> str:
         "max_depth": "Maximum folder depth, from 1 to 8.",
         "max_entries": "Maximum entries to show, from 1 to 500.",
     },
+    group="project",
 )
 def project_tree(path: str = ".", max_depth: int = 3, max_entries: int = 300) -> str:
     if not 1 <= max_depth <= 8 or not 1 <= max_entries <= 500:
@@ -323,6 +329,7 @@ def project_tree(path: str = ".", max_depth: int = 3, max_entries: int = 300) ->
         "content": "The full text to write into the file.",
     },
     approval=True,
+    group="project",
 )
 def write_file(path: str, content: str) -> str:
     try:
@@ -345,6 +352,7 @@ def write_file(path: str, content: str) -> str:
         "new_text": "The text to put in its place.",
     },
     approval=True,
+    group="project",
 )
 def edit_file(path: str, old_text: str, new_text: str) -> str:
     try:
@@ -388,6 +396,7 @@ def edit_file(path: str, old_text: str, new_text: str) -> str:
         },
     },
     approval=True,
+    group="project",
 )
 def apply_patch(path: str, patches: list[dict[str, str]]) -> str:
     try:
@@ -431,6 +440,7 @@ def apply_patch(path: str, patches: list[dict[str, str]]) -> str:
     description="Move one workspace file into .trash instead of permanently deleting it.",
     params={"path": "File path relative to the workspace."},
     approval=True,
+    group="project",
 )
 def delete_file(path: str) -> str:
     try:

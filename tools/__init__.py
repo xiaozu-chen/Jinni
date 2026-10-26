@@ -2,9 +2,12 @@ import logging
 import pkgutil
 from importlib import import_module
 
-from .registry import NEEDS_APPROVAL, REMEMBERABLE, SCOPES, TOOL_FUNCTIONS, TOOL_SCHEMAS
+from .registry import (
+    NEEDS_APPROVAL, REMEMBERABLE, SCOPES, TOOL_FUNCTIONS, TOOL_GROUPS, TOOL_SCHEMAS,
+    tool_names, tool_schemas,
+)
 
-__all__ = ["NEEDS_APPROVAL", "REMEMBERABLE", "SCOPES", "TOOL_FUNCTIONS", "TOOL_SCHEMAS", "LOAD_ERRORS", "load_plugins"]
+__all__ = ["NEEDS_APPROVAL", "REMEMBERABLE", "SCOPES", "TOOL_FUNCTIONS", "TOOL_GROUPS", "TOOL_SCHEMAS", "tool_names", "tool_schemas", "LOAD_ERRORS", "load_plugins"]
 
 log = logging.getLogger("jinni.tools")
 SKIP = {"registry"}

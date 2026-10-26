@@ -16,6 +16,7 @@ from tools import registry
 def clean_registry(monkeypatch):
     monkeypatch.setattr(registry, "TOOL_FUNCTIONS", {})
     monkeypatch.setattr(registry, "TOOL_SCHEMAS", [])
+    monkeypatch.setattr(registry, "TOOL_GROUPS", {})
     monkeypatch.setattr(registry, "NEEDS_APPROVAL", set())
     monkeypatch.setattr(registry, "REMEMBERABLE", set())
     monkeypatch.setattr(registry, "SCOPES", {})

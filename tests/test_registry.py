@@ -58,6 +58,12 @@ def test_real_tools_are_discovered():
     schema = next(item["function"]["parameters"] for item in tools.TOOL_SCHEMAS
                   if item["function"]["name"] == "apply_patch")
     assert schema["properties"]["patches"]["type"] == "array"
+    assert registry.TOOL_GROUPS["write_file"] == "project"
+    assert "write_file" not in tools.tool_names(False)
+    assert "write_file" in tools.tool_names(True)
+    assert "write_file" not in {
+        schema["function"]["name"] for schema in tools.tool_schemas(False)
+    }
 
 
 def test_dangerous_tools_require_approval():

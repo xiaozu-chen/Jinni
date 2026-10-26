@@ -12,7 +12,8 @@ from config import settings, GRAY, RESET
 from context import compact, to_transcript
 from models import Message, ToolCall
 from retry import with_retries
-from tools import TOOL_FUNCTIONS, REMEMBERABLE, SCOPES, TOOL_SCHEMAS, NEEDS_APPROVAL
+from tools import TOOL_FUNCTIONS, REMEMBERABLE, SCOPES, TOOL_SCHEMAS, NEEDS_APPROVAL, tool_names, tool_schemas
+from tools.registry import TOOL_GROUPS
 from tools.web import is_trusted_url, trust_urls_from_text
 import memory
 from memory import MemoryStore, Proposal, extraction_prompt, parse_proposals
@@ -98,7 +99,7 @@ async def execute(call: ToolCall, args: dict[str, Any]) -> str:
 
 class Agent:
     def __init__(self, store: MemoryStore | None = None, project_guidance: str = "",
-                 allowed_file=None) -> None:
+                 allowed_file=None, project_active: bool | None = None) -> None:
         self.client = AsyncOpenAI(
             base_url=settings.base_url, 
             api_key="not-needed", 
@@ -113,6 +114,7 @@ class Agent:
         self.allowed: set[tuple[str, str]] = set()
         self.write_checkpoint: str | None = None
         self.allowed_file = allowed_file
+        self.project_active = project_active
         self.stats = {
             "laps": 0,
             "prompt_tokens": 0,
@@ -122,6 +124,12 @@ class Agent:
         self.tool_counts: Counter[str] = Counter()
         self.memory: MemoryStore = store if store is not None else memory.get_store()
         self.apply_memory()
+
+    def set_project_active(self, active: bool) -> None:
+        self.project_active = active
+
+    def visible_tool_names(self) -> set[str]:
+        return tool_names(self.project_active)
 
     async def request(self, **kwargs: Any):
         return await with_retries(
@@ -161,7 +169,12 @@ class Agent:
     async def run_tools(self, calls: list[ToolCall]) -> list[str]:
         self.tool_counts.update(call.name for call in calls)
         previous_approvals = self.allowed.copy()
-        plans = [authorize(c, self.allowed) for c in calls]
+        plans = [
+            (None, "Error: project tools are available only after selecting a managed project.")
+            if self.project_active is False and TOOL_GROUPS.get(call.name) == "project"
+            else authorize(call, self.allowed)
+            for call in calls
+        ]
         if self.allowed_file and self.allowed != previous_approvals:
             try:
                 save_approvals(self.allowed_file, self.allowed)
@@ -219,7 +232,7 @@ class Agent:
         stream = await self.request(
             model=settings.model,
             messages=self.messages,
-            tools=TOOL_SCHEMAS,
+            tools=tool_schemas(self.project_active),
             stream=True,
             stream_options={"include_usage": True},
             extra_body={"chat_template_kwargs": {"enable_thinking": self.thinking_on}},

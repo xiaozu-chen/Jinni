@@ -6,6 +6,7 @@ TOOL_FUNCTIONS: dict[str, Callable[..., str]] = {}
 TOOL_SCHEMAS: list[dict[str, Any]] = []
 NEEDS_APPROVAL: set[str] = set()
 REMEMBERABLE: set[str] = set()
+TOOL_GROUPS: dict[str, str] = {}
 
 ScopeFn = Callable[[dict[str, Any]], str]
 SCOPES: dict[str, ScopeFn] = {}
@@ -13,12 +14,25 @@ SCOPES: dict[str, ScopeFn] = {}
 JSON_TYPES = {str: "string", int: "integer", float: "number", bool: "boolean"}
 
 
+def tool_names(project_active: bool | None = None) -> set[str]:
+    return {
+        name for name in TOOL_FUNCTIONS
+        if project_active is not False or TOOL_GROUPS.get(name, "core") != "project"
+    }
+
+
+def tool_schemas(project_active: bool | None = None) -> list[dict[str, Any]]:
+    names = tool_names(project_active)
+    return [schema for schema in TOOL_SCHEMAS if schema["function"]["name"] in names]
+
+
 def add_tool(name: str, 
              fn: Callable[..., Any], 
              description: str, 
              parameters: dict[str, Any], 
              approval: bool = False, 
-             remember: bool = False) -> None:
+             remember: bool = False,
+             group: str = "core") -> None:
     #
     if name in TOOL_FUNCTIONS:
         raise ValueError(f"tool '{name}' is already registered")
@@ -27,6 +41,7 @@ def add_tool(name: str,
         "type": "function",
         "function": {"name": name, "description": description, "parameters": parameters},
     })
+    TOOL_GROUPS[name] = group
     if approval:
         NEEDS_APPROVAL.add(name)
     if remember:
@@ -38,6 +53,7 @@ def remove_tool(name: str) -> None:
     NEEDS_APPROVAL.discard(name)
     REMEMBERABLE.discard(name)
     SCOPES.pop(name, None)
+    TOOL_GROUPS.pop(name, None)
     TOOL_SCHEMAS[:] = [s for s in TOOL_SCHEMAS if s["function"]["name"] != name]
 
 
@@ -45,7 +61,8 @@ def tool(description: str,
              params: dict[str, Any] | None = None,
          approval: bool = False, 
          remember: bool = False, 
-         scope: ScopeFn | None = None):
+         scope: ScopeFn | None = None,
+         group: str = "core"):
     #
     if remember and not approval:
         raise ValueError("remember=True only make sense together with approval=True")
@@ -74,7 +91,7 @@ def tool(description: str,
         if required:
             schema["required"] = required
 
-        add_tool(name, fn, description, schema, approval, remember)
+        add_tool(name, fn, description, schema, approval, remember, group)
         if scope:
             SCOPES[name] = scope
         return fn

@@ -91,6 +91,7 @@ def _run_checker(checker: str, path: str, full: Path) -> str:
         "path": "Python file path relative to the workspace.",
         "checker": "One of py_compile, ruff, or pyright.",
     },
+    group="project",
 )
 def check_python(path: str, checker: str = "py_compile") -> str:
     if checker not in {"py_compile", "ruff", "pyright"}:

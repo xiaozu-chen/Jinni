@@ -122,6 +122,16 @@ def test_tools_cannot_access_project_control_files(workspace):
             safe_path(path)
 
 
+def test_project_tools_are_hidden_and_refused_without_an_active_project(monkeypatch):
+    agent = Agent(project_active=False)
+    monkeypatch.setattr(agent_mod, "execute", lambda *args: pytest.fail("hidden tools cannot run"))
+
+    result = asyncio.run(agent.run_tools([make_call("write_file", {"path": "a.txt", "content": "x"})]))
+
+    assert "only after selecting a managed project" in result[0]
+    assert "write_file" not in agent.visible_tool_names()
+
+
 def test_remembered_approval_is_marked_auto(monkeypatch):
     trust_urls_from_text("https://example.com/one https://example.com/two")
     monkeypatch.setattr("builtins.input", lambda _: "a")
