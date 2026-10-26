@@ -54,6 +54,7 @@ class Settings:
 
     # memory
     memory_db: Path = Path("memory.db")
+    allowed_file: Path = Path("workspace/.jinni/allowed.json")
     max_facts: int = 20
     max_fact_chars: int = 200
     memory_prompt_chars: int = 2400

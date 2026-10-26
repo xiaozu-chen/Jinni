@@ -20,6 +20,7 @@ import inspect
 from approval_preview import change_preview, validate_python_change
 from audit import record_call
 from approval_preview import summarize_arguments
+from approval_store import save_approvals
 
 log = logging.getLogger("jinni.agent")
 CHECKPOINTED_WRITES = {"write_file", "edit_file", "apply_patch", "delete_file", "make_chart", "fetch_table"}
@@ -96,7 +97,8 @@ async def execute(call: ToolCall, args: dict[str, Any]) -> str:
         return f"Error: {e}"
 
 class Agent:
-    def __init__(self, store: MemoryStore | None = None, project_guidance: str = "") -> None:
+    def __init__(self, store: MemoryStore | None = None, project_guidance: str = "",
+                 allowed_file=None) -> None:
         self.client = AsyncOpenAI(
             base_url=settings.base_url, 
             api_key="not-needed", 
@@ -110,6 +112,7 @@ class Agent:
         self.parallel_tools: bool = settings.parallel_tools
         self.allowed: set[tuple[str, str]] = set()
         self.write_checkpoint: str | None = None
+        self.allowed_file = allowed_file
         self.stats = {
             "laps": 0,
             "prompt_tokens": 0,
@@ -157,7 +160,13 @@ class Agent:
     # new: async tool running
     async def run_tools(self, calls: list[ToolCall]) -> list[str]:
         self.tool_counts.update(call.name for call in calls)
+        previous_approvals = self.allowed.copy()
         plans = [authorize(c, self.allowed) for c in calls]
+        if self.allowed_file and self.allowed != previous_approvals:
+            try:
+                save_approvals(self.allowed_file, self.allowed)
+            except OSError as error:
+                log.warning("could not persist domain approvals: %s", type(error).__name__)
         runnable = sum(1 for args, _ in plans if args is not None)
         start = time.perf_counter()
         run_parallel = self.parallel_tools and not any(call.name == "ask_user" for call in calls)

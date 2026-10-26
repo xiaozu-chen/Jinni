@@ -274,6 +274,23 @@ def test_search_results_authorize_follow_up_fetch(monkeypatch):
     assert message == ""
 
 
+def test_always_allow_for_a_domain_is_persisted(workspace, monkeypatch):
+    from approval_store import load_approvals
+
+    trust_urls_from_text("https://example.com/page")
+    monkeypatch.setattr("builtins.input", lambda _: "a")
+
+    async def fake_execute(call, args):
+        return "fetched"
+
+    monkeypatch.setattr(agent_mod, "execute", fake_execute)
+    path = workspace / ".jinni" / "allowed.json"
+    agent = Agent(allowed_file=path)
+    asyncio.run(agent.run_tools([make_call("fetch_url", {"url": "https://example.com/page"})]))
+
+    assert load_approvals(path) == {("fetch_url", "example.com")}
+
+
 def test_search_tool_output_adds_trusted_urls(monkeypatch):
     monkeypatch.setattr("builtins.input", lambda _: "y")
 

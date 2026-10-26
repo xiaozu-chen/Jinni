@@ -24,6 +24,7 @@ from svgcharts import is_genuine_page
 from chart_records import check_chart_record, record_genuine_chart
 from audit import recent_calls
 from transcripts import load_transcript, save_transcript
+from approval_store import load_approvals, save_approvals
 import project as project_tools
 import tools.workspace as workspace_tools
 
@@ -76,7 +77,8 @@ def help_text() -> str:
   /think             toggle model reasoning display
   /parallel          toggle parallel tool calls
   /tools             list available tools
-  /allowed, /revoke  inspect or clear session approvals
+  /allowed           inspect saved domain approvals
+  /revoke [DOMAIN]   revoke saved approvals for a domain, or all domains
   /memory [FILTER]   browse memories by fact/event or search text
   /forget            remove saved memories
   /tasks             show the saved task list
@@ -214,7 +216,8 @@ def main(argv: list[str] | None = None) -> None:
         log.warning("plugin skipped: %s", err)
         print(f"  (plugin skipped: {err})")
 
-    agent = Agent(project_guidance=project_guidance)
+    agent = Agent(project_guidance=project_guidance, allowed_file=settings.allowed_file)
+    agent.allowed.update(load_approvals(settings.allowed_file))
     due = due_tasks()
     if due != "(task list is empty)":
         print("  Tasks due today or overdue:")
@@ -281,14 +284,27 @@ def main(argv: list[str] | None = None) -> None:
                         print(f"  {name}{'  (asks first)' if name in NEEDS_APPROVAL else ''}")
                     continue
                 if cmd == "/allowed":
+                    persisted = load_approvals(settings.allowed_file)
                     if not agent.allowed:
-                        print("  (nothing is allowed without asking)")
+                        print("  (nothing is remembered; asks again on each new domain)")
                     for name, scope in sorted(agent.allowed):
-                        print(f"  {name}: {'any use' if scope == '*' else scope}")
+                        status = "saved" if (name, scope) in persisted else "session only"
+                        print(f"  {name}: {scope} [{status}]")
                     continue
                 if cmd == "/revoke":
-                    agent.allowed.clear()
-                    print("  (all session permissions revoked)")
+                    domain = arg.strip().lower().removeprefix("www.").rstrip(".")
+                    if domain:
+                        agent.allowed = {item for item in agent.allowed if item[1] != domain}
+                        message = f"(saved approvals for {domain} revoked)"
+                    else:
+                        agent.allowed.clear()
+                        message = "(all saved domain approvals revoked)"
+                    try:
+                        save_approvals(settings.allowed_file, agent.allowed)
+                    except OSError as error:
+                        print(f"  (could not save revocation: {type(error).__name__})")
+                    else:
+                        print(f"  {message}")
                     continue
                 if cmd == "/memory":
                     show_memories(agent, arg)
