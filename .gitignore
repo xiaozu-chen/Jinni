@@ -11,3 +11,4 @@ freeze-*.txt
 settings.toml
 build/
 *.egg-info/
+_ignore_this_script.py
