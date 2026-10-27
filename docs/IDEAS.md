@@ -190,20 +190,20 @@ automatically. Sources of taint: `fetch_url`, `web_search`, any MCP tool, and `r
 come from sessions that contained web text). A fresh conversation clears it. Open question: should reading
 files copied in from outside also taint?
 
-Subagent results must inherit session taint when this mechanism is built.
+Subagent runs inherit the session taint state.
 
 **Safeguards for the mode itself:**
 
-- [ ] Only the user can enable it, with a CLI command the model never sees. The warning text comes from our code, not the model.
-- [ ] **Typed confirmation** ("FULL ACCESS"), not y/n.
-- [ ] Session only. Never persisted, and exiting reverts it.
-- [ ] Always-visible prompt marker: `you [FULL ACCESS] >`.
-- [ ] A budget: expires after N tool calls or 30 minutes, then asks again.
-- [ ] `/safe` reverts instantly, and the first Ctrl+C reverts it too.
-- [ ] Scoped to the active project, and built only after checkpoints and `/undo` exist.
-- [ ] Every auto-approved call is marked "auto" in the audit log.
-- [ ] A config switch (`allow_full_access = False`) that removes the feature entirely.
-- [ ] A pure **policy function** (tool, mode, project, taint → allow / ask / deny), used by `authorize()`, tested with a full decision table (see Appendix B).
+- [x] Only the user can enable it, with a CLI command the model never sees. The warning text comes from our code, not the model.
+- [x] **Typed confirmation** ("FULL ACCESS"), not y/n.
+- [x] Session only. Never persisted, and exiting reverts it.
+- [x] Always-visible prompt marker: `you [FULL ACCESS] >`.
+- [x] A budget: expires after 20 tool calls or 30 minutes, then asks again.
+- [x] `/safe` reverts instantly, and the first Ctrl+C reverts it too.
+- [x] Scoped to the active project, and built only after checkpoints and `/undo` exist.
+- [x] Every auto-approved call is marked "auto" in the audit log.
+- [x] A config switch (`allow_full_access = False`) that removes the feature entirely.
+- [x] A pure **policy function** (tool, mode, project, taint → allow / ask / deny), used by `authorize()`, tested with a full decision table (see Appendix B).
 
 Open question: would **Auto-edit alone** solve the annoyance? If the real pain is web or command prompts, a smaller
 fix may do: remember a domain, a quieter prompt, or batched approvals.
@@ -424,7 +424,7 @@ The warning lists what stays blocked as well as what opens up, because that is w
 
 ---
 
-## Appendix B: policy decision table (draft, finalize when built)
+## Appendix B: policy decision table (implemented)
 
 | Situation | Ask | Auto-edit | Full Access |
 |---|---|---|---|
@@ -437,8 +437,8 @@ The warning lists what stays blocked as well as what opens up, because that is w
 | Delete | no tool | no tool | no tool |
 | Changing the mode | user only | user only | user only |
 
-Tests to write with it: a tainted session never auto-approves a write; free-form commands never auto-approve
-outside isolation; `/safe` always returns to asking; the model can never change the mode.
+The decision table is covered by `tests/test_permission_policy.py`, including tainted writes, isolated
+commands, MCP allowlisting, project scope, and delete denial.
 
 ---
 

@@ -313,7 +313,9 @@ def register_server_tools(server: Any) -> Registration:
         description = f"[via MCP server '{clean(cfg.name)}'] {t.description or ''}".strip()[:300]
         try:
             add_tool(name, make_caller(server, t.name), description, build_parameters(t),
-                     approval=True, remember=(t.name in cfg.remember))
+                     approval=True, remember=(t.name in cfg.remember),
+                     scope=(lambda _args, exposed=name: exposed) if t.name in cfg.remember else None,
+                     group="mcp")
         except ValueError as e:
             reg.problems.append(str(e))
             continue

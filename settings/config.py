@@ -34,7 +34,7 @@ class Settings:
     system_prompt: str = "You are Jinni, a helpful local AI agent. Keep answers concise."
     max_steps: int = 8
     thinking_default: bool = False
-    thinking_classifier_model: str = "smolLM2"
+    thinking_classifier_model: str = "trained-classifier"
     thinking_classifier_base_url: str = "http://127.0.0.1:8082/v1"
     thinking_classifier_timeout: float = 3.0
 
@@ -114,6 +114,7 @@ class Settings:
 
     # Project execution (PowerShell remains opt-in; both tools require isolation)
     powershell_enabled: bool = False
+    allow_full_access: bool = False
 
     # PNG export (uses an installed Edge or Chrome, headless)
     browser_path: str = ""

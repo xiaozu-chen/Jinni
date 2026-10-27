@@ -55,6 +55,8 @@ See [the command reference](docs/COMMANDS.md) for every slash command and common
 
 Thinking is off by default. `/think` toggles a manual override for the current session. The read-only `delegate` helper is disabled by default; enabling `subagents_enabled` in `settings.toml` exposes it.
 
+Approval modes are session-only: `/mode ask` uses approval prompts, while `/mode auto-edit` skips prompts only for checkpointed edits in the active managed project. Full Access is disabled by default. To enable the opt-in CLI command, add `allow_full_access = true` to `settings.toml`; then `/full-access` shows the code-owned warning and requires typing `FULL ACCESS`. It expires after 20 tool calls or 30 minutes, and `/safe` or Ctrl+C reverts it. Web, MCP, and saved-memory results taint the session and turn Full Access off. The web UI remains in Ask mode.
+
 To choose thinking automatically, run a small OpenAI-compatible chat model on a separate local endpoint (port 8082 by default), then set `thinking_classifier_model` to the model name served there and `thinking_classifier_base_url` to that endpoint in `settings.toml`. The classifier sees only the latest user message and must answer `on` or `off`; if it is unavailable or returns an invalid label, Jinni uses `thinking_default`. `/think on` and `/think off` set a session override; `/think auto` returns control to the classifier.
 
 ## Verify changes

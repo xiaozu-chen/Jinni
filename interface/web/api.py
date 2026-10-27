@@ -3,8 +3,12 @@
 import asyncio
 import json
 import logging
+import os
 import re
+import shutil
+import tempfile
 import threading
+import time
 from collections import deque
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field, replace
@@ -16,6 +20,7 @@ from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
+from permission.policy import FULL_ACCESS_BUDGET, FULL_ACCESS_SECONDS, FULL_ACCESS_WARNING
 from permission.approval_store import load_approvals
 from runtime.agent import Agent
 from runtime.agent_events import AgentEvent
@@ -61,12 +66,26 @@ class SessionEditRequest(BaseModel):
     message_index: int = Field(ge=0)
 
 
+class WorkingWindowRequest(BaseModel):
+    activities: list[dict[str, object]] = Field(max_length=2000)
+    action_details: list[str] = Field(alias="actionDetails", max_length=2000)
+    visible: bool = False
+    expanded: bool = False
+    actions_expanded: bool = Field(default=True, alias="actionsExpanded")
+    elapsed_seconds: int = Field(default=0, ge=0, alias="elapsedSeconds")
+
+
 class InteractionRequest(BaseModel):
     answer: str = Field(min_length=1)
 
 
 class ReasoningModeRequest(BaseModel):
     mode: Literal["auto", "thinking", "fast"]
+
+
+class PermissionModeRequest(BaseModel):
+    mode: Literal["ask", "auto-edit", "full-access"]
+    confirmation: str = ""
 
 
 class McpServerCreateRequest(BaseModel):
@@ -92,6 +111,8 @@ class ChatSession:
     summary: str = ""
     context_used: int = 0
     user_display: dict[int, dict[str, object]] = field(default_factory=dict)
+    working_window: dict[str, object] = field(default_factory=dict)
+    partial_assistant: str | None = None
 
 
 class WebRuntime:
@@ -102,6 +123,7 @@ class WebRuntime:
         workspace_tools.PROJECT_ACTIVE = False
         export_all.WORKSPACE = workspace_tools.WORKSPACE
         self.lock = threading.RLock()
+        self.persist_timer: threading.Timer | None = None
         self.events: deque[dict[str, object]] = deque(maxlen=1000)
         self.actions: deque[dict[str, object]] = deque(maxlen=100)
         self.next_event_id = 1
@@ -115,10 +137,12 @@ class WebRuntime:
         self.projects: dict[str, dict[str, str]] = {}
         self.sessions: dict[str, ChatSession] = {}
         self.active_session_id = ""
+        self.permission_states: dict[str, dict[str, object]] = {}
         self.task: asyncio.Task[None] | None = None
         # Keep the chat store beside the backend repository even when the app
         # launches the server with a different process working directory.
         self.session_store = Path(__file__).resolve().parents[2] / "data" / "web_sessions.json"
+        self.session_load_failed = False
         self.agent = Agent(
             allowed_file=settings.allowed_file,
             project_active=False,
@@ -141,7 +165,11 @@ class WebRuntime:
         if not saved_active or saved_active not in self.sessions:
             self.active_session_id = self._create_session(None)
             self._activate_session(self.active_session_id)
-        self._persist_sessions()
+        # Never replace a file that failed to load with an empty in-memory
+        # session list. Keep the saved data intact so the failure can be
+        # diagnosed or recovered instead of silently wiping every chat.
+        if not self.session_load_failed:
+            self._persist_sessions()
 
     def _load_sessions(self) -> None:
         try:
@@ -152,15 +180,17 @@ class WebRuntime:
             data = json.loads(self.session_store.read_text(encoding="utf-8"))
             if not isinstance(data, dict):
                 raise ValueError("session store must contain an object")
+            if not isinstance(data.get("projects", []), list) or not isinstance(data.get("sessions"), list):
+                raise ValueError("session store has an invalid projects or sessions list")
             for project in data.get("projects", []):
                 if isinstance(project, dict) and all(isinstance(project.get(key), str) for key in ("id", "path", "name")):
                     self.projects[project["id"]] = {key: project[key] for key in ("id", "path", "name")}
             for row in data.get("sessions", []):
                 if not isinstance(row, dict) or not isinstance(row.get("id"), str):
-                    continue
+                    raise ValueError("session store contains an invalid session record")
                 messages = row.get("messages", [])
                 if not isinstance(messages, list) or any(not isinstance(item, dict) for item in messages):
-                    continue
+                    raise ValueError("session store contains an invalid message list")
                 display = row.get("user_display", {})
                 if not isinstance(display, dict):
                     display = {}
@@ -184,6 +214,7 @@ class WebRuntime:
                     summary=str(row.get("summary") or ""),
                     context_used=max(0, int(row.get("context_used", 0) or 0)),
                     user_display=user_display,
+                    working_window=row.get("working_window", {}) if isinstance(row.get("working_window", {}), dict) else {},
                 )
             active = data.get("active_session_id")
             if isinstance(active, str):
@@ -193,10 +224,28 @@ class WebRuntime:
             self.sessions.clear()
             self.projects.clear()
             self.active_session_id = ""
+            self.session_load_failed = True
+            if self.session_store.exists():
+                backup = self.session_store.with_name(
+                    f"{self.session_store.name}.unreadable-{uuid4().hex[:8]}"
+                )
+                try:
+                    shutil.copy2(self.session_store, backup)
+                except OSError:
+                    log.exception("could not preserve the unreadable session file")
+                else:
+                    log.error("preserved unreadable session file at %s", backup)
 
     def _persist_sessions(self) -> None:
+        if self.session_load_failed:
+            log.error("session writes are disabled because the saved session file could not be recovered")
+            return
         with self.lock:
-            self._write_session_store()
+            try:
+                self._write_session_store()
+            except OSError:
+                log.exception("could not persist web sessions; the in-memory session remains available")
+                self._schedule_session_persist(2.0)
 
     def _write_session_store(self) -> None:
         data = {
@@ -212,14 +261,39 @@ class WebRuntime:
                     "summary": session.summary,
                     "context_used": session.context_used,
                     "user_display": {str(index): value for index, value in session.user_display.items()},
+                    "working_window": session.working_window,
                 }
                 for session in self.sessions.values()
             ],
         }
         self.session_store.parent.mkdir(parents=True, exist_ok=True)
-        temporary = self.session_store.with_suffix(self.session_store.suffix + ".tmp")
-        temporary.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
-        temporary.replace(self.session_store)
+        temporary: Path | None = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                mode="w", encoding="utf-8", dir=self.session_store.parent,
+                prefix=f"{self.session_store.name}.", suffix=".tmp", delete=False,
+            ) as stream:
+                temporary = Path(stream.name)
+                json.dump(data, stream, ensure_ascii=False)
+                stream.flush()
+                os.fsync(stream.fileno())
+            last_error: OSError | None = None
+            for attempt in range(6):
+                try:
+                    os.replace(temporary, self.session_store)
+                    return
+                except PermissionError as error:
+                    last_error = error
+                    if attempt < 5:
+                        time.sleep(0.05 * (2 ** attempt))
+            if last_error is not None:
+                raise last_error
+        finally:
+            if temporary is not None:
+                try:
+                    temporary.unlink(missing_ok=True)
+                except OSError:
+                    log.debug("could not remove temporary session file %s", temporary)
 
     @staticmethod
     def _display_prompt(display: dict[str, object]) -> str:
@@ -244,6 +318,22 @@ class WebRuntime:
     def _agent_event(self, event: AgentEvent) -> None:
         published = self._publish(event.kind, text=event.text, **event.details)
         with self.lock:
+            session = self.sessions.get(self.active_session_id)
+            if session is not None:
+                session.messages = [dict(message) for message in self.agent.messages]
+                if event.kind == "text_delta":
+                    if session.partial_assistant is None:
+                        session.partial_assistant = ""
+                    session.partial_assistant += event.text
+                elif event.kind == "responder_start":
+                    session.partial_assistant = ""
+                elif event.kind == "responder_delta":
+                    session.partial_assistant = (session.partial_assistant or "") + event.text
+                elif event.kind in {"action_stream", "action_started"}:
+                    session.partial_assistant = None
+                if session.partial_assistant is not None:
+                    session.messages.append({"role": "assistant", "content": session.partial_assistant})
+                self._schedule_session_persist()
             if event.kind == "thinking_start":
                 self.thinking_content = ""
                 self.thinking_active = True
@@ -259,6 +349,32 @@ class WebRuntime:
                     "text": event.text,
                     **event.details,
                 })
+
+    def _schedule_session_persist(self, delay: float = 0.5) -> None:
+        with self.lock:
+            if self.persist_timer is not None and self.persist_timer.is_alive():
+                return
+            self.persist_timer = threading.Timer(delay, self._run_scheduled_persist)
+            self.persist_timer.daemon = True
+            self.persist_timer.start()
+
+    def _run_scheduled_persist(self) -> None:
+        with self.lock:
+            self.persist_timer = None
+        self._persist_sessions()
+
+    def update_working_window(self, session_id: str, state: WorkingWindowRequest) -> None:
+        with self.lock:
+            session = self.sessions.get(session_id)
+            if session is None:
+                raise HTTPException(status_code=404, detail="Chat was not found.")
+            session.working_window = state.model_dump(by_alias=True)
+            self._schedule_session_persist()
+
+    def active_working_window(self) -> dict[str, object]:
+        with self.lock:
+            session = self.sessions.get(self.active_session_id)
+            return dict(session.working_window) if session else {}
 
     def _request_interaction(self, kind: str, prompt: str, choices: str) -> str:
         interaction_id = uuid4().hex
@@ -327,6 +443,12 @@ class WebRuntime:
 
     def state(self) -> dict[str, object]:
         with self.lock:
+            self._sync_active_permission_state()
+            permission = self.permission_states.get(self.active_session_id, {})
+            expires_at = float(permission.get("full_access_expires_at", 0) or 0)
+            if permission.get("mode") == "full-access" and expires_at <= time.monotonic():
+                self._set_permission_state("ask", tainted=bool(permission.get("tainted", False)))
+                permission = self.permission_states.get(self.active_session_id, {})
             return {
                 "busy": self.busy,
                 "project": str(self.project) if self.project else None,
@@ -337,7 +459,61 @@ class WebRuntime:
                 "thinking_classifier_base_url": settings.thinking_classifier_base_url,
                 "latest_event_id": self.next_event_id - 1,
                 "active_session_id": self.active_session_id,
+                "permission_mode": permission.get("mode", "ask"),
+                "session_tainted": bool(permission.get("tainted", False)),
+                "full_access_remaining": int(permission.get("remaining", 0) or 0),
+                "full_access_expires_in": max(0, int(expires_at - time.monotonic())) if permission.get("mode") == "full-access" else 0,
+                "allow_full_access": settings.allow_full_access,
+                "full_access_warning": FULL_ACCESS_WARNING,
             }
+
+    def set_permission_mode(self, mode: Literal["ask", "auto-edit", "full-access"], confirmation: str = "") -> dict[str, object]:
+        with self.lock:
+            current = self.permission_states.get(self.active_session_id, {})
+            tainted = bool(current.get("tainted", getattr(self.agent, "session_tainted", False)))
+            if mode == "ask":
+                # Safe mode is intentionally available during a running turn.
+                self._set_permission_state("ask", tainted=tainted)
+            else:
+                self._ensure_idle("change permission mode")
+                if not self._active_project_id() or not self.agent.project_active:
+                    raise HTTPException(status_code=409, detail="Open a project before enabling this permission mode.")
+                if tainted:
+                    raise HTTPException(status_code=409, detail="This chat is tainted. Approval bypasses stay off until you start a fresh chat.")
+                if mode == "auto-edit":
+                    self._set_permission_state("auto-edit", tainted=tainted)
+                else:
+                    if not settings.allow_full_access:
+                        raise HTTPException(status_code=403, detail="Full Access is disabled in backend configuration.")
+                    if confirmation != "FULL ACCESS":
+                        raise HTTPException(status_code=400, detail="Type FULL ACCESS exactly to enable Full Access.")
+                    self._set_permission_state(
+                        "full-access", tainted=False,
+                        remaining=FULL_ACCESS_BUDGET,
+                        expires_at=time.monotonic() + FULL_ACCESS_SECONDS,
+                    )
+            return self.state()
+
+    def _set_permission_state(self, mode: str, *, tainted: bool, remaining: int = 0, expires_at: float = 0) -> None:
+        state = {"mode": mode, "tainted": tainted, "remaining": remaining, "full_access_expires_at": expires_at}
+        self.permission_states[self.active_session_id] = state
+        # Agent policy remains the authority for tool approvals; mirror the
+        # selected chat's ephemeral web setting into its live agent instance.
+        self.agent.approval_mode = mode
+        self.agent.session_tainted = tainted
+        self.agent.full_access_remaining = remaining
+        self.agent.full_access_expires_at = expires_at
+
+    def _sync_active_permission_state(self) -> None:
+        if not self.active_session_id or self.active_session_id not in self.sessions:
+            return
+        state = self.permission_states.setdefault(self.active_session_id, {
+            "mode": "ask", "tainted": False, "remaining": 0, "full_access_expires_at": 0,
+        })
+        state["mode"] = getattr(self.agent, "approval_mode", state.get("mode", "ask"))
+        state["tainted"] = bool(getattr(self.agent, "session_tainted", state.get("tainted", False)))
+        state["remaining"] = int(getattr(self.agent, "full_access_remaining", state.get("remaining", 0)) or 0)
+        state["full_access_expires_at"] = float(getattr(self.agent, "full_access_expires_at", state.get("full_access_expires_at", 0)) or 0)
 
     def model_status(self) -> dict[str, object]:
         used = getattr(self.agent, "context_used", 0)
@@ -455,6 +631,7 @@ class WebRuntime:
                     "project_id": session.project_id,
                     "message_count": sum(
                         message.get("role") in {"user", "assistant"}
+                        and not (message.get("role") == "assistant" and message.get("tool_calls"))
                         for message in session.messages
                     ),
                 }
@@ -505,6 +682,7 @@ class WebRuntime:
                 if message.get("role") in {"user", "assistant"}
                 and isinstance(message.get("content"), str)
                 and message["content"]
+                and not (message.get("role") == "assistant" and message.get("tool_calls"))
             ]
 
     def start_chat(
@@ -626,6 +804,7 @@ class WebRuntime:
         with self.lock:
             self._ensure_idle("clear the conversation")
             self._reset_session()
+            self._set_permission_state("ask", tainted=False)
             self.sessions[self.active_session_id].user_display.clear()
             self._save_active_session()
         self._publish("session_cleared")
@@ -661,6 +840,7 @@ class WebRuntime:
                 raise HTTPException(status_code=404, detail="Chat was not found.")
             project_id = self.sessions[session_id].project_id
             del self.sessions[session_id]
+            self.permission_states.pop(session_id, None)
             if session_id == self.active_session_id:
                 replacement = next(
                     (
@@ -684,6 +864,8 @@ class WebRuntime:
             for index, message in enumerate(session.messages):
                 if message.get("role") not in {"user", "assistant"}:
                     continue
+                if message.get("role") == "assistant" and message.get("tool_calls"):
+                    continue
                 exported = {"role": message["role"], "content": message.get("content", "")}
                 exported.update(session.user_display.get(index, {}))
                 messages.append(exported)
@@ -701,6 +883,7 @@ class WebRuntime:
                 if session.project_id == project_id
             ]:
                 del self.sessions[session_id]
+                self.permission_states.pop(session_id, None)
             if active_project_id == project_id:
                 replacement = next(iter(self.sessions.values()), None)
                 if replacement is None:
@@ -755,6 +938,7 @@ class WebRuntime:
             "project_id": session.project_id,
             "message_count": sum(
                 message.get("role") in {"user", "assistant"}
+                and not (message.get("role") == "assistant" and message.get("tool_calls"))
                 for message in session.messages
             ),
         }
@@ -770,6 +954,7 @@ class WebRuntime:
         session.messages = [dict(message) for message in self.agent.messages]
         session.summary = self.agent.summary
         session.context_used = getattr(self.agent, "context_used", 0)
+        session.partial_assistant = None
         self._persist_sessions()
 
     def _activate_session(self, session_id: str, *, guidance: str | None = None) -> None:
@@ -787,7 +972,9 @@ class WebRuntime:
                 raise HTTPException(status_code=400, detail=str(error)) from error
 
         self._save_active_session()
+        self._sync_active_permission_state()
         self.active_session_id = session.id
+        permission = self.permission_states.get(session.id, {})
         if path is not None:
             workspace_tools.WORKSPACE = path
             workspace_tools.PROJECT_ACTIVE = True
@@ -808,6 +995,10 @@ class WebRuntime:
         if not self.agent.messages:
             self.agent.messages = [{"role": "system", "content": self.agent.system_prompt}]
         self.agent.apply_memory()
+        self.agent.approval_mode = permission.get("mode", "ask")
+        self.agent.session_tainted = bool(permission.get("tainted", False))
+        self.agent.full_access_remaining = int(permission.get("remaining", 0) or 0)
+        self.agent.full_access_expires_at = float(permission.get("full_access_expires_at", 0) or 0)
         self._persist_sessions()
         self.thinking_content = ""
         self.thinking_active = False
@@ -906,6 +1097,16 @@ def update_session(
     runtime: Annotated[WebRuntime, Depends(get_runtime)],
 ) -> dict[str, object]:
     return runtime.rename_session(session_id, body.title)
+
+
+@app.patch("/api/sessions/{session_id}/working-window")
+def update_working_window(
+    session_id: str,
+    body: WorkingWindowRequest,
+    runtime: Annotated[WebRuntime, Depends(get_runtime)],
+) -> dict[str, bool]:
+    runtime.update_working_window(session_id, body)
+    return {"saved": True}
 
 
 @app.delete("/api/sessions/{session_id}")
@@ -1042,6 +1243,14 @@ def set_reasoning_mode(
     return {"mode": body.mode}
 
 
+@app.post("/api/permission-mode")
+def set_permission_mode(
+    body: PermissionModeRequest,
+    runtime: Annotated[WebRuntime, Depends(get_runtime)],
+) -> dict[str, object]:
+    return runtime.set_permission_mode(body.mode, body.confirmation)
+
+
 @app.post("/api/project/select")
 def select_project(
     body: ProjectRequest, runtime: Annotated[WebRuntime, Depends(get_runtime)],
@@ -1072,7 +1281,8 @@ def get_events(
     runtime: Annotated[WebRuntime, Depends(get_runtime)],
     after: Annotated[int, Query(ge=0)] = 0,
 ) -> dict[str, object]:
-    return {"events": runtime.events_after(after), "busy": runtime.state()["busy"]}
+    state = runtime.state()
+    return {"events": runtime.events_after(after), "busy": state["busy"], "state": state}
 
 
 @app.post("/api/interactions/{interaction_id}")
@@ -1087,7 +1297,7 @@ def answer_interaction(
 
 @app.get("/api/session")
 def get_session(runtime: Annotated[WebRuntime, Depends(get_runtime)]) -> dict[str, object]:
-    return {"messages": runtime.session()}
+    return {"messages": runtime.session(), "working_window": runtime.active_working_window()}
 
 
 @app.delete("/api/session")

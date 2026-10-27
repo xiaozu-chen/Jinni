@@ -30,6 +30,10 @@ from permission.approval_preview import change_preview, validate_python_change
 from permission.audit import record_call
 from permission.approval_preview import summarize_arguments
 from permission.approval_store import save_approvals
+from permission.policy import (
+    FULL_ACCESS_BUDGET, FULL_ACCESS_SECONDS, SESSION_TAINTED,
+    ApprovalMode, describe_tool, permission_decision, taints_session,
+)
 from runtime.agent_events import AgentEvent, EventSink
 
 log = logging.getLogger("jinni.agent")
@@ -58,7 +62,12 @@ WORKSPACE_FILE_GUIDANCE = (
     "ask_user only when a missing detail prevents an action. With no active project, ask "
     "the user to select a project in the frontend; do not claim to search files or see chat "
     "attachments. If project search finds no match, say that you checked and ask for a path. "
-    "Never claim to have checked without actually searching."
+    "Never claim to have checked without actually searching. For code changes to an existing file, "
+    "read it first and make the smallest targeted edit with edit_file or apply_patch; do not replace "
+    "the whole file with write_file. Preserve unrelated code and formatting. After fixing a code error, "
+    "inspect the affected section and run the relevant tests or a focused command when available. "
+    "Report which checks actually ran and their results; never imply a check ran when it did not. "
+    "Approval modes are controlled by the user at the CLI; never request or attempt to change them."
 )
 
 
@@ -139,6 +148,11 @@ def authorize(
     allowed: set[tuple[str, str]] | None = None,
     emit: EventSink | None = None,
     input_func: Callable[[str], str] | None = None,
+    *,
+    mode: ApprovalMode | str = "ask",
+    project_active: bool = True,
+    tainted: bool = False,
+    on_accepted: Callable[[], None] | None = None,
 ) -> tuple[dict[str, Any] | None, str]:
     # Treat model output as a proposal: validate it, apply policy, then ask the human if needed.
     allowed = set() if allowed is None else allowed
@@ -157,13 +171,18 @@ def authorize(
     if call.name not in TOOL_FUNCTIONS:
         return None, f"Error: unknown tool '{call.name}'"
 
+    scope = SCOPES[call.name](args) if call.name in SCOPES else "*"
+    key = (call.name, scope)
+    policy_tool = describe_tool(call.name, mcp_remembered=call.name in REMEMBERABLE)
+    decision = permission_decision(policy_tool, mode, project_active, tainted)
+    if decision == "deny":
+        return None, f"Error: policy denies access to '{call.name}' in this context."
+
     if call.name in ("fetch_url", "fetch_table") and not is_trusted_url(str(args.get("url", ""))):
         return None, "Error: fetch only URLs you supplied or that appeared in a search result."
     
+    auto_approved = decision == "allow" or (decision == "ask" and key in allowed and not tainted)
     if call.name in NEEDS_APPROVAL:
-        scope = SCOPES[call.name](args) if call.name in SCOPES else "*"
-        key = (call.name, scope)
-        auto_approved = key in allowed
         if call.name in ("write_file", "edit_file", "apply_patch"):
             syntax_error = validate_python_change(call.name, args)
             if syntax_error:
@@ -195,6 +214,8 @@ def authorize(
         except OSError as error:
             log.exception("could not record approved tool call")
             return None, f"Error: the call was not run because the audit log could not be written ({error})."
+    if on_accepted:
+        on_accepted()
     return args, ""
 
 async def execute(call: ToolCall, args: dict[str, Any] | None, *, redact_result: bool = False) -> str:
@@ -224,6 +245,7 @@ class Agent:
                  tool_menu: set[str] | None = None, quiet: bool = False,
                  thinking_override: bool | None = None, no_memory: bool = False,
                  redact_tool_results: bool = False,
+                 session_tainted: bool = False,
                  interaction_provider: Callable[[str, str, str], str] | None = None) -> None:
         self.client = AsyncOpenAI(
             base_url=settings.base_url, 
@@ -250,6 +272,10 @@ class Agent:
         self.thinking_source = "default" if thinking_override is None else "manual"
         self.parallel_tools: bool = settings.parallel_tools
         self.allowed: set[tuple[str, str]] = set()
+        self.approval_mode: ApprovalMode = "ask"
+        self.session_tainted = session_tainted
+        self.full_access_remaining = 0
+        self.full_access_expires_at = 0.0
         self.write_checkpoint: str | None = None
         self.replay_recorder: "SessionRecorder | None" = None
         self.allowed_file = allowed_file
@@ -297,7 +323,46 @@ class Agent:
         return input(prompt)
 
     def set_project_active(self, active: bool) -> None:
+        if active != self.project_active and self.approval_mode != "ask":
+            self.safe_mode("the active project changed")
         self.project_active = active
+
+    def enable_auto_edit(self) -> None:
+        if not self.project_active:
+            raise ValueError("Auto-edit requires an active managed project.")
+        self.approval_mode = "auto-edit"
+
+    def enable_full_access(self) -> None:
+        if not settings.allow_full_access:
+            raise ValueError("Full Access is disabled by allow_full_access = false.")
+        if not self.project_active:
+            raise ValueError("Full Access requires an active managed project.")
+        if self.session_tainted:
+            raise ValueError("This session is tainted; start a fresh chat before enabling Full Access.")
+        self.approval_mode = "full-access"
+        self.full_access_remaining = FULL_ACCESS_BUDGET
+        self.full_access_expires_at = time.monotonic() + FULL_ACCESS_SECONDS
+
+    def safe_mode(self, reason: str | None = None) -> None:
+        was_full = self.approval_mode == "full-access"
+        self.approval_mode = "ask"
+        self.full_access_remaining = 0
+        self.full_access_expires_at = 0.0
+        if was_full and reason:
+            self.emit(AgentEvent("status", f"  [safety] Full Access ended: {reason}. Approvals are required again."))
+
+    def _consume_full_access_call(self) -> None:
+        if self.approval_mode != "full-access":
+            return
+        self.full_access_remaining -= 1
+        if self.full_access_remaining <= 0:
+            self.safe_mode("the 20-call budget expired")
+        elif time.monotonic() >= self.full_access_expires_at:
+            self.safe_mode("the 30-minute limit expired")
+
+    def refresh_approval_mode(self) -> None:
+        if self.approval_mode == "full-access" and time.monotonic() >= self.full_access_expires_at:
+            self.safe_mode("the 30-minute limit expired")
 
     def visible_tool_names(self) -> set[str]:
         visible = tool_names(self.project_active)
@@ -384,6 +449,7 @@ class Agent:
         # Decide all approvals before starting the batch, so parallel calls can't outrun consent.
         plans = []
         for call in calls:
+            self.refresh_approval_mode()
             # The schema only suggests tools; this executor check is the actual fence, nya.
             if self.tool_menu is not None and call.name not in self.tool_menu:
                 plans.append((None, "Error: that tool is not available to a subagent."))
@@ -392,9 +458,21 @@ class Agent:
             elif self.interaction_provider:
                 plans.append(await asyncio.to_thread(
                     authorize, call, self.allowed, self.emit, self._approval_input,
+                    mode=self.approval_mode, project_active=bool(self.project_active),
+                    tainted=self.session_tainted, on_accepted=self._consume_full_access_call,
                 ))
             else:
-                plans.append(authorize(call, self.allowed, self.emit))
+                plans.append(authorize(
+                    call, self.allowed, self.emit,
+                    mode=self.approval_mode, project_active=bool(self.project_active),
+                    tainted=self.session_tainted, on_accepted=self._consume_full_access_call,
+                ))
+            if plans[-1][0] is not None and taints_session(describe_tool(call.name)) and not self.session_tainted:
+                self.session_tainted = True
+                if self.approval_mode == "full-access":
+                    self.safe_mode("untrusted content entered the session")
+                else:
+                    self.emit(AgentEvent("status", "  [safety] This session is now tainted; auto-approval is disabled."))
         if self.allowed_file and self.allowed != previous_approvals:
             try:
                 save_approvals(self.allowed_file, self.allowed)
@@ -407,8 +485,13 @@ class Agent:
             run_parallel = False
 
         async def one(call: ToolCall, args: dict[str, Any] | None, refusal: str) -> str:
+            details: dict[str, object] = {"name": call.name, "call_id": call.id}
+            if args is not None and call.name == "run_tests":
+                details["command_preview"] = f"pytest {args.get('path', 'tests')} (isolated)"
+            elif args is not None and call.name == "run_powershell":
+                details["command_preview"] = str(args.get("script", ""))[:4_000]
             self.emit(AgentEvent(
-                "action_started", call.name, {"name": call.name, "call_id": call.id},
+                "action_started", call.name, details,
             ))
             if args is None:
                 self.emit(AgentEvent(
@@ -435,12 +518,14 @@ class Agent:
                     ))
                     return f"Error: {error}"
             token = USER_INPUT_PROVIDER.set(self.interaction_provider)
+            taint_token = SESSION_TAINTED.set(self.session_tainted)
             try:
                 if self.redact_tool_results:
                     result = await execute(call, args, redact_result=True)
                 else:
                     result = await execute(call, args)
             finally:
+                SESSION_TAINTED.reset(taint_token)
                 USER_INPUT_PROVIDER.reset(token)
             name = call.name.lower()
             if name in {"web_search", "search_snippets_for_chart"} or name.endswith("_search_text"):
@@ -448,7 +533,12 @@ class Agent:
             self.emit(AgentEvent(
                 "action_completed",
                 call.name,
-                {"name": call.name, "call_id": call.id, "success": not result.startswith("Error:")},
+                {
+                    "name": call.name,
+                    "call_id": call.id,
+                    "success": not result.startswith("Error:"),
+                    **({"result_preview": result[:8_000]} if call.name in {"run_tests", "run_powershell"} else {}),
+                },
             ))
             return result
 
@@ -602,7 +692,7 @@ class Agent:
                 text = chunk.choices[0].delta.content
                 if text:
                     reply_parts.append(text)
-                    self.emit(AgentEvent("text_delta", text))
+                    self.emit(AgentEvent("responder_delta", text))
         finally:
             await stream.close()
 
@@ -687,6 +777,9 @@ class Agent:
             extra_body={"chat_template_kwargs": {"enable_thinking": False}},
         )
         notes = (response.choices[0].message.content or "").strip()[:2_000]
+        self.session_tainted = False
+        if self.approval_mode == "full-access":
+            self.safe_mode("a fresh subtask context started")
         self.summary = ""
         self.messages = [{"role": "system", "content": settings.system_prompt}]
         self.apply_memory()

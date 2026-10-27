@@ -19,7 +19,6 @@ from runtime.agent_events import AgentEvent
 from server.mcp_config import resolve_mcp_servers
 from runtime.logger import setup_logging
 from runtime.agent import Agent
-from runtime.review import review, review_stale_facts
 from tools import LOAD_ERRORS, NEEDS_APPROVAL
 from tools.interaction import due_tasks, task_list
 from tools.workspace import find_chart
@@ -36,6 +35,7 @@ from memory.transcripts import load_transcript, save_transcript
 from memory.session_replay import SessionRecorder, render_replay, replay_path, replay_session
 from server.embedding_server import EmbeddingServer
 from permission.approval_store import load_approvals, save_approvals
+from permission.policy import FULL_ACCESS_WARNING
 import runtime.project as project_tools
 import tools.workspace as workspace_tools
 
@@ -99,6 +99,9 @@ def help_text() -> str:
   /help              show this list
   /config            show effective settings (sensitive values are hidden)
   /undo              remove the latest chat turn from conversation history
+  /mode ask|auto-edit choose approval behavior for this session
+  /full-access       request bounded Full Access (if enabled)
+  /safe              return to Ask mode immediately
   /project [NAME]    list or switch projects; /project create NAME makes one
   /subtask TASK      summarize prior work and start with a fresh context
   /think [on|off|auto] toggle reasoning, or return to automatic classification
@@ -144,6 +147,7 @@ def config_text(config=settings, mcp_servers=None) -> str:
         f"context limit: {config.context_limit} tokens",
         f"thinking: {thinking}",
         f"parallel tools: {'on' if config.parallel_tools else 'off'}",
+        f"Full Access: {'enabled by user command' if config.allow_full_access else 'disabled (allow_full_access = false)'}",
         f"search: {config.search_backend} ({config.search_region})",
         f"memory limits: {config.max_facts} facts, {config.max_fact_chars} chars each, {config.memory_prompt_chars} prompt chars, {config.recall_results} recall results",
         f"embeddings: {'on' if config.embed_enabled else 'off'}",
@@ -209,6 +213,8 @@ def mcp_restart_target(argument: str) -> str | None:
 
 def activate_project(path, agent: Agent) -> str:
     """Switch workspace-scoped tools and guidance together to one managed project."""
+    if agent.approval_mode != "ask":
+        agent.safe_mode("the active project changed")
     path = Path(path).expanduser().resolve()
     guidance = project_tools.load_project_guidance(path)
     workspace_tools.WORKSPACE = path
@@ -285,7 +291,16 @@ def main(argv: list[str] | None = None) -> None:
         print(f"  ({len(agent.visible_tool_names())} tools loaded)")
         try:
             while True:
-                user_text = input("you > ").strip()
+                agent.refresh_approval_mode()
+                marker = "you [FULL ACCESS] > " if agent.approval_mode == "full-access" else "you > "
+                try:
+                    user_text = input(marker).strip()
+                except KeyboardInterrupt:
+                    if agent.approval_mode == "full-access":
+                        agent.safe_mode("Ctrl+C was pressed")
+                        print("  [safety] Full Access ended; approvals are required again.")
+                        continue
+                    raise
                 if user_text.lower() in ("exit", "quit"):
                     break
                 if not user_text:
@@ -299,6 +314,50 @@ def main(argv: list[str] | None = None) -> None:
                     continue
                 if cmd == "/undo":
                     print(undo_last_turn(agent))
+                    continue
+                if cmd == "/safe":
+                    agent.safe_mode()
+                    print("  (approval mode: Ask)")
+                    continue
+                if cmd == "/mode":
+                    requested = arg.strip().lower()
+                    if requested == "ask":
+                        agent.safe_mode()
+                        print("  (approval mode: Ask)")
+                    elif requested == "auto-edit":
+                        try:
+                            agent.enable_auto_edit()
+                        except ValueError as error:
+                            print(f"  ({error})")
+                        else:
+                            print("  (Auto-edit enabled for this CLI session and active project)")
+                    elif requested == "full-access":
+                        print("  (use /full-access to review its warning and type the confirmation)")
+                    else:
+                        print("  (usage: /mode ask|auto-edit)")
+                    continue
+                if cmd == "/full-access":
+                    if not settings.allow_full_access:
+                        print("  (Full Access is disabled by allow_full_access = false.)")
+                        continue
+                    if not agent.project_active:
+                        print("  (Full Access requires an active managed project.)")
+                        continue
+                    print(FULL_ACCESS_WARNING)
+                    try:
+                        confirmation = input("  confirmation > ")
+                    except (KeyboardInterrupt, EOFError):
+                        print("  (Full Access cancelled)")
+                        continue
+                    if confirmation != "FULL ACCESS":
+                        print("  (Full Access cancelled)")
+                        continue
+                    try:
+                        agent.enable_full_access()
+                    except ValueError as error:
+                        print(f"  ({error})")
+                    else:
+                        print("  [safety] Full Access active for this session.")
                     continue
                 if cmd == "/subtask":
                     try:
@@ -603,6 +662,9 @@ def main(argv: list[str] | None = None) -> None:
                 try:
                     runner.run(agent.chat(user_text))
                 except KeyboardInterrupt:
+                    if agent.approval_mode == "full-access":
+                        agent.safe_mode("Ctrl+C was pressed")
+                        print("\n  [safety] Full Access ended; approvals are required again.")
                     print("\n  (interrupted, that turn was dropped)")
         except (KeyboardInterrupt, EOFError):
             print()
@@ -610,24 +672,6 @@ def main(argv: list[str] | None = None) -> None:
         if agent.replay_recorder:
             agent.replay_recorder.close()
             agent.replay_recorder = None
-        print("  (looking back over this session...)")
-        try:
-            proposals = runner.run(agent.propose_memories())
-            if proposals:
-                saved = review(agent.memory, proposals)
-                print(f"  ({saved} saved)")
-            else:
-                print("  (nothing new to remember)")
-        except (Exception, KeyboardInterrupt) as e:
-            log.exception("memory review failed")
-            print(f"  (skipped the memory review: {type(e).__name__})")
-        try:
-            deleted = review_stale_facts(agent.memory)
-            if deleted:
-                print(f"  ({deleted} stale fact(s) forgotten)")
-        except (Exception, KeyboardInterrupt) as e:
-            log.exception("stale memory review failed")
-            print(f"  (skipped stale memory review: {type(e).__name__})")
         if manager:
             try:
                 runner.run(manager.stop())

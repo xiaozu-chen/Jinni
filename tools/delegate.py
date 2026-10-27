@@ -14,10 +14,11 @@ DELEGATE_DESCRIPTION = (
 async def delegate(task: str) -> str:
     """Run one isolated lookup; the child cannot write or start another child."""
     from runtime.subagent import ERROR_NESTED, SUBAGENT_DEPTH, run_subagent
+    from permission.policy import SESSION_TAINTED
 
     if SUBAGENT_DEPTH.get() > 0:
         return ERROR_NESTED
-    return await run_subagent(task)
+    return await run_subagent(task, session_tainted=SESSION_TAINTED.get())
 
 
 def register_delegate(enabled: bool) -> None:

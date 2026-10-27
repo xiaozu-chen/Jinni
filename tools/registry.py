@@ -20,6 +20,7 @@ JSON_TYPES = {str: "string", int: "integer", float: "number", bool: "boolean"}
 def tool_names(project_active: bool | None = None) -> set[str]:
     return {
         name for name in TOOL_FUNCTIONS
+        if name != "delete_file"
         if project_active is not False or TOOL_GROUPS.get(name, "core") != "project"
     }
 
@@ -38,8 +39,13 @@ def add_tool(name: str,
              approval: bool = False, 
              remember: bool = False,
              group: str = "core",
-             subagent_safe: bool = False) -> None:
+             subagent_safe: bool = False,
+             scope: ScopeFn | None = None) -> None:
     """Keep the function, schema, group, and approval sets in sync as one registration."""
+    if remember and not approval:
+        raise ValueError("remember=True only makes sense together with approval=True")
+    if scope and not remember:
+        raise ValueError("scope only makes sense together with remember=True")
     if name in TOOL_FUNCTIONS:
         raise ValueError(f"tool '{name}' is already registered")
     TOOL_FUNCTIONS[name] = fn
@@ -52,6 +58,8 @@ def add_tool(name: str,
         NEEDS_APPROVAL.add(name)
     if remember:
         REMEMBERABLE.add(name)
+    if scope:
+        SCOPES[name] = scope
     if subagent_safe and not approval:
         SUBAGENT_SAFE.add(name)
 
@@ -101,9 +109,7 @@ def tool(description: str,
         if required:
             schema["required"] = required
 
-        add_tool(name, fn, description, schema, approval, remember, group, subagent_safe)
-        if scope:
-            SCOPES[name] = scope
+        add_tool(name, fn, description, schema, approval, remember, group, subagent_safe, scope)
         return fn
 
     return decorator

@@ -340,6 +340,8 @@ def project_tree(path: str = ".", max_depth: int = 3, max_entries: int = 300) ->
 def write_file(path: str, content: str) -> str:
     try:
         full = safe_path(path)
+        if full.exists():
+            return f"Error: '{path}' already exists. Read it and use edit_file or apply_patch for changes; write_file only creates new files."
         full.parent.mkdir(parents=True, exist_ok=True)
         full.write_text(content, encoding="utf-8")
         mark_written(full)

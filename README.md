@@ -1,5 +1,7 @@
 # J I N N I
 
+Current architecture: Amber 2.0
+
 ![alt text](tn.jpg)
 
 ## Development setup

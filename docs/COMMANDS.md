@@ -11,6 +11,10 @@ Type these at the `you >` prompt. Use `/help` in the app to see the built-in lis
 | `/help` | Prints the interactive command list. | Find a command or check its syntax. |
 | `/config` | Shows effective, non-sensitive settings and configured MCP servers. | Check which model, context, search, memory, and server options are active. |
 | `/undo` | Removes the latest user turn from chat history. If that turn made a checkpointed workspace write, it also attempts to restore that write. | Back out the latest exchange and, when possible, its last managed-project write. It does not reverse external side effects. |
+| `/mode ask` | Returns to approval prompts for risky tools. | Use the default cautious mode for this session. |
+| `/mode auto-edit` | Skips prompts for checkpointed edits in the active managed project. | Make project code edits with fewer prompts while web, MCP, and command tools still ask. |
+| `/full-access` | Shows a code-owned warning and requires typing `FULL ACCESS`; available only when `allow_full_access = true`. | Enable time-limited Full Access in the active managed project. |
+| `/safe` | Immediately returns to Ask mode. | Re-enable approval prompts. |
 | `/project`, `/project list` | Lists managed projects and marks the active one. | See which copied project Jinni will work in. |
 | `/project NAME` | Switches to a managed project and loads its `JINNI.md` guidance. | Choose the project workspace for project tools. |
 | `/project create NAME` | Creates and activates a managed project. | Start a clean project workspace. |
@@ -49,7 +53,7 @@ Type these at the `you >` prompt. Use `/help` in the app to see the built-in lis
 | `/mcp-table SERVER TOOL [JSON]` | Calls an allowlisted MCP tool that returns columns and rows, then saves the table as a provenance-labeled workspace CSV. Arguments must be a JSON object. | Bring structured MCP data into Jinni’s chart workflow. |
 | `/recall QUERY` | Searches saved memories and prints matching results. | Quickly retrieve a past fact or session note. |
 | `/reindex` | Catches up embeddings for memories that do not yet have them. | Refresh semantic memory search after model/service changes or missed embedding work. |
-| `exit` / `quit` | Leaves the CLI, runs the end-of-session memory review, and stops managed services. | End a session cleanly. |
+| `exit` / `quit` | Leaves the CLI and stops managed services. | End a session cleanly. |
 
 ### Task-list tool actions
 

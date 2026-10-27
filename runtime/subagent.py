@@ -158,6 +158,7 @@ def _loop_lock() -> asyncio.Lock:
 
 async def _run(task: str) -> tuple[str, int, int, int]:
     from runtime.agent import Agent
+    from permission.policy import SESSION_TAINTED
 
     menu = effective_tool_menu()
     child = Agent(
@@ -168,6 +169,7 @@ async def _run(task: str) -> tuple[str, int, int, int]:
         thinking_override=settings.subagent_thinking,
         no_memory=True,
         redact_tool_results=True,
+        session_tainted=SESSION_TAINTED.get(),
     )
     child.messages = [
         {"role": "system", "content": SYSTEM_PROMPT},
@@ -214,7 +216,9 @@ async def _run(task: str) -> tuple[str, int, int, int]:
                 child.memory.conn.close()
 
 
-async def run_subagent(task: str) -> str:
+async def run_subagent(task: str, *, session_tainted: bool = False) -> str:
+    from permission.policy import SESSION_TAINTED
+
     if SUBAGENT_DEPTH.get() > 0:
         return ERROR_NESTED
     clean_task = " ".join(task.split())[:settings.subagent_task_chars] if isinstance(task, str) else ""
@@ -232,6 +236,7 @@ async def run_subagent(task: str) -> str:
     lock = _loop_lock()
     acquired = False
     token = SUBAGENT_DEPTH.set(1)
+    taint_token = SESSION_TAINTED.set(session_tainted)
     try:
         async with asyncio.timeout(settings.subagent_timeout):
             await lock.acquire()
@@ -266,6 +271,7 @@ async def run_subagent(task: str) -> str:
         print(f"  [subagent {run_id}] failed")
         return ERROR_MODEL
     finally:
+        SESSION_TAINTED.reset(taint_token)
         SUBAGENT_DEPTH.reset(token)
         if acquired:
             lock.release()
