@@ -70,6 +70,36 @@ def test_api_chat_and_session(monkeypatch, tmp_path):
         assert client.get("/api/session").json()["messages"] == []
 
 
+def test_backend_restart_preserves_active_project_transcript(monkeypatch, tmp_path):
+    monkeypatch.setattr(web_api, "Agent", FakeAgent)
+    monkeypatch.setattr(web_api, "load_approvals", lambda _path: set())
+    with tempfile.TemporaryDirectory(dir=Path(__file__).resolve().parents[1]) as folder:
+        root = Path(folder)
+        monkeypatch.setattr(web_api, "WEB_SESSION_STORE", root / "web_sessions.json")
+        monkeypatch.setattr(web_api.workspace_tools, "DEFAULT_WORKSPACE", root / "workspace")
+        source = root / "source"
+        source.mkdir()
+        (source / "app.py").write_text("print('hello')\n", encoding="utf-8")
+
+        before_restart = web_api.WebRuntime()
+        before_restart.import_project(str(source))
+        active_id = before_restart.active_session_id
+        before_restart.agent.messages.extend([
+            {"role": "user", "content": "Create a small web server."},
+            {"role": "assistant", "content": "I created the server in app.py."},
+        ])
+        before_restart._save_active_session()
+
+        after_restart = web_api.WebRuntime()
+
+        assert after_restart.active_session_id == active_id
+        assert after_restart.session() == [
+            {"role": "user", "content": "Create a small web server."},
+            {"role": "assistant", "content": "I created the server in app.py."},
+        ]
+        assert after_restart.project == source.resolve()
+
+
 def test_stop_request_declines_pending_interactions(monkeypatch, tmp_path):
     monkeypatch.setattr(web_api, "Agent", FakeAgent)
     monkeypatch.setattr(web_api, "load_approvals", lambda _path: set())
@@ -90,6 +120,26 @@ def test_stop_request_declines_pending_interactions(monkeypatch, tmp_path):
     assert ready.is_set()
     assert runtime.interactions["pending-approval"]["answer"] == "abort"
     assert runtime.events[-1]["text"] == "Stop requested. Waiting for the active action to finish."
+
+
+def test_responder_chunks_are_published_as_they_arrive(monkeypatch, tmp_path):
+    monkeypatch.setattr(web_api, "Agent", FakeAgent)
+    monkeypatch.setattr(web_api, "load_approvals", lambda _path: set())
+    monkeypatch.setattr(web_api.workspace_tools, "DEFAULT_WORKSPACE", tmp_path)
+    runtime = web_api.WebRuntime()
+
+    runtime._agent_event(web_api.AgentEvent("responder_start"))
+    runtime._agent_event(web_api.AgentEvent("responder_delta", "The result "))
+    runtime._agent_event(web_api.AgentEvent("responder_delta", "is ready."))
+
+    events = runtime.events_after(0)
+    assert [(event["type"], event["text"]) for event in events] == [
+        ("responder_start", ""),
+        ("responder_delta", "The result "),
+        ("responder_delta", "is ready."),
+    ]
+    session = runtime.sessions[runtime.active_session_id]
+    assert session.messages[-1] == {"role": "assistant", "content": "The result is ready."}
 
 
 def test_chat_is_rejected_during_mcp_reconfiguration(monkeypatch, tmp_path):

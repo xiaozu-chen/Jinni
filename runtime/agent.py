@@ -45,6 +45,12 @@ CHECKPOINTED_WRITES = {
 }
 RETRYABLE = (openai.APIConnectionError, openai.InternalServerError)
 DECLINED = "The user declined this action. It was their choice, not a technical error. Do not retry; ask what they want instead."
+CONTEXT_OVERFLOW_MARKERS = (
+    "exceed_context_size_error",
+    "exceeds the available context size",
+    "maximum context length",
+    "context length is too long",
+)
 RESPONDER_ROLE_PROMPT = (
     "You are Jinni's Responder. The agent's work is complete. Write a concise, user-facing summary "
     "of what was done and the result, using the conversation, tool results, and agent draft as evidence. "
@@ -577,6 +583,12 @@ class Agent:
         generated = 0
         request_messages = json.loads(json.dumps(self.messages, ensure_ascii=False))
         request_tools = json.loads(json.dumps(tool_schemas(self.project_active, self.tool_menu), ensure_ascii=False))
+        estimated_prompt_tokens = max(1, (len(json.dumps(
+            {"messages": request_messages, "tools": request_tools}, ensure_ascii=False,
+        )) + 3) // 4)
+        streamed_chars = 0
+        last_context_estimate = -1
+        context_update_step = max(1, settings.context_limit // 100)
 
         stream = await self.request(
             model=settings.model,
@@ -607,18 +619,24 @@ class Agent:
                     first = time.perf_counter() - start
 
                 if thought and self.thinking_on:
+                    streamed_chars += len(thought)
                     if not thinking:
                         self.emit(AgentEvent("thinking_start"))
                         thinking = True
                     self.emit(AgentEvent("thinking_delta", thought))
 
                 if delta.content:
+                    streamed_chars += len(delta.content)
                     if thinking:
                         self.emit(AgentEvent("thinking_end"))
                         thinking = False
                     if emit_text:
                         self.emit(AgentEvent("text_delta", delta.content))
                     content += delta.content
+
+                for tc in delta.tool_calls or []:
+                    if tc.function:
+                        streamed_chars += len(tc.function.name or "") + len(tc.function.arguments or "")
 
                 for tc in delta.tool_calls or []:
                     slot = calls.setdefault(
@@ -644,6 +662,21 @@ class Agent:
                                 details["added"], details["deleted"] = counts
                             self.emit(AgentEvent("action_stream", details=details))
                             slot["last_progress"] = progress
+
+                estimate = min(
+                    settings.context_limit,
+                    estimated_prompt_tokens + (streamed_chars + 3) // 4,
+                )
+                if last_context_estimate < 0 or estimate - last_context_estimate >= context_update_step:
+                    self.emit(AgentEvent(
+                        "context_usage",
+                        details={
+                            "context_used": estimate,
+                            "context_limit": settings.context_limit,
+                            "context_estimated": True,
+                        },
+                    ))
+                    last_context_estimate = estimate
 
         finally:
             await stream.close()
@@ -684,6 +717,10 @@ class Agent:
 
         self.emit(AgentEvent("responder_start"))
         start = time.perf_counter()
+        estimated_prompt_tokens = max(1, (len(json.dumps(response_messages, ensure_ascii=False)) + 3) // 4)
+        streamed_chars = 0
+        last_context_estimate = -1
+        context_update_step = max(1, settings.context_limit // 100)
         stream = await self.request(
             model=settings.model,
             messages=response_messages,
@@ -703,8 +740,23 @@ class Agent:
                     continue
                 text = chunk.choices[0].delta.content
                 if text:
+                    streamed_chars += len(text)
                     reply_parts.append(text)
                     self.emit(AgentEvent("responder_delta", text))
+                    estimate = min(
+                        settings.context_limit,
+                        estimated_prompt_tokens + (streamed_chars + 3) // 4,
+                    )
+                    if last_context_estimate < 0 or estimate - last_context_estimate >= context_update_step:
+                        self.emit(AgentEvent(
+                            "context_usage",
+                            details={
+                                "context_used": estimate,
+                                "context_limit": settings.context_limit,
+                                "context_estimated": True,
+                            },
+                        ))
+                        last_context_estimate = estimate
         finally:
             await stream.close()
 
@@ -725,17 +777,30 @@ class Agent:
         return reply
 
     async def _append_responder_reply(self, draft: str) -> bool:
-        try:
-            reply = await self.respond_after_work(draft)
-        except Exception as error:
-            log.exception("responder request failed")
-            self.emit(AgentEvent(
-                "status", f"  (responder failed: {type(error).__name__})",
-            ))
-            self.emit(AgentEvent("error", f"Responder failed: {type(error).__name__}"))
-            return False
-        self.messages.append({"role": "assistant", "content": reply})
-        return True
+        for attempt in range(3):
+            try:
+                reply = await self.respond_after_work(draft)
+                self.messages.append({"role": "assistant", "content": reply})
+                return True
+            except Exception as error:
+                if self._is_context_overflow(error) and attempt < 2:
+                    if await self.compact_context_for_retry(attempt):
+                        continue
+                if self._is_context_overflow(error):
+                    message = (
+                        "The response still exceeds the model's context window after compacting the conversation. "
+                        "Your work is preserved, but the summary could not be generated."
+                    )
+                    self.messages.append({"role": "assistant", "content": message})
+                    self.emit(AgentEvent("error", message))
+                    return False
+                log.exception("responder request failed")
+                self.emit(AgentEvent(
+                    "status", f"  (responder failed: {type(error).__name__})",
+                ))
+                self.emit(AgentEvent("error", f"Responder failed: {type(error).__name__}"))
+                return False
+        return False
 
     async def summarize_history(self, keep: int = settings.keep_turns) -> bool:
         user_idxs = [i for i, m in enumerate(self.messages) if m["role"] == "user"]
@@ -769,6 +834,96 @@ class Agent:
         self.emit(AgentEvent("status", f"  (summarized {len(old)} messages into notes)"))
         self.emit(AgentEvent("status", f"  notes: {self.summary}"))
         return True
+
+    @staticmethod
+    def _is_context_overflow(error: Exception) -> bool:
+        details = [str(error)]
+        body = getattr(error, "body", None)
+        if body is not None:
+            details.append(str(body))
+        response = getattr(error, "response", None)
+        if response is not None:
+            try:
+                details.append(str(response.json()))
+            except Exception:
+                pass
+        message = " ".join(details).lower()
+        return any(marker in message for marker in CONTEXT_OVERFLOW_MARKERS)
+
+    async def compact_context_for_retry(self, attempt: int) -> bool:
+        """Reduce request history after the provider rejects an oversized prompt."""
+        original_size = sum(len(str(message.get("content", ""))) for message in self.messages)
+        original_size += sum(
+            len(str(call.get("function", {}).get("arguments", "")))
+            for message in self.messages for call in message.get("tool_calls", [])
+        )
+        keep_turns = max(1, min(settings.keep_turns, 2) - attempt)
+        tool_result_limit = 1_200 if attempt == 0 else 500
+        tool_arguments_limit = 1_500 if attempt == 0 else 500
+
+        self.emit(AgentEvent(
+            "context_compaction", "Compacting context...",
+            {"phase": "start", "progress": 5},
+        ))
+        await asyncio.sleep(0)
+
+        user_idxs = [i for i, message in enumerate(self.messages) if message["role"] == "user"]
+        if len(user_idxs) > keep_turns:
+            cut = user_idxs[-keep_turns]
+            excerpt = to_transcript(self.messages[1:cut]).strip()
+            reference = None
+            if excerpt:
+                if len(excerpt) > 1_400:
+                    excerpt = excerpt[:700] + "\n...[earlier history omitted]...\n" + excerpt[-700:]
+                reference = {
+                    "role": "user",
+                    "content": "Earlier conversation excerpt for reference only (incomplete):\n" + excerpt,
+                }
+            del self.messages[1:cut]
+            if reference:
+                self.messages.insert(1, reference)
+
+        self.emit(AgentEvent(
+            "context_compaction", "Compacting context...",
+            {"phase": "progress", "progress": 55},
+        ))
+        await asyncio.sleep(0)
+
+        # Tool output is the largest and least reliable portion of many histories.
+        # Keep the beginning and end so paths, summaries, and final diagnostics survive.
+        for message in self.messages[1:]:
+            content = message.get("content")
+            if isinstance(content, str):
+                limit = tool_result_limit if message["role"] == "tool" else 4_000
+                if len(content) > limit:
+                    head = int(limit * 0.75)
+                    tail = limit - head
+                    message["content"] = content[:head] + f"\n...[context compacted; {len(content) - limit} characters omitted]...\n" + content[-tail:]
+            for call in message.get("tool_calls", []):
+                function = call.get("function", {})
+                arguments = function.get("arguments", "")
+                if isinstance(arguments, str) and len(arguments) > tool_arguments_limit:
+                    function["arguments"] = json.dumps({
+                        "_context_compacted": True,
+                        "original_characters": len(arguments),
+                    })
+
+        self.summary = self.summary[-2_000:]
+        self.apply_memory()
+        compacted_size = sum(len(str(message.get("content", ""))) for message in self.messages)
+        compacted_size += sum(
+            len(str(call.get("function", {}).get("arguments", "")))
+            for message in self.messages for call in message.get("tool_calls", [])
+        )
+        changed = compacted_size < original_size
+        self.emit(AgentEvent(
+            "context_compaction",
+            "Context compacted" if changed else "Could not compact context further",
+            {"phase": "complete" if changed else "failed",
+                "progress": 100 if changed else 0,
+                "characters_removed": max(0, original_size - compacted_size)},
+        ))
+        return changed
 
     async def start_subtask(self, task: str) -> str:
         task = task.strip()
@@ -845,6 +1000,7 @@ class Agent:
 
         step = 0
         did_work = False
+        context_recovery_attempts = 0
         step_limit = max(1, settings.max_steps)
         while True:
             if self.stop_requested:
@@ -879,6 +1035,20 @@ class Agent:
                 else:
                     content, calls, used = await self.stream_response()
             except Exception as e:
+                if self._is_context_overflow(e):
+                    if context_recovery_attempts < 2:
+                        recovered = await self.compact_context_for_retry(context_recovery_attempts)
+                        context_recovery_attempts += 1
+                        if recovered:
+                            continue
+                    message = (
+                        "This request still exceeds the model's context window after compacting the conversation. "
+                        "Your message is still here; shorten it or start a new chat and try again."
+                    )
+                    log.warning("model rejected the request after %d context compaction attempt(s)", context_recovery_attempts)
+                    self.messages.append({"role": "assistant", "content": message})
+                    self.emit(AgentEvent("error", message))
+                    return
                 log.exception("model request failed")
                 keep_preloaded_user = user_message_preloaded and turn_start < len(self.messages)
                 del self.messages[turn_start + int(keep_preloaded_user):]

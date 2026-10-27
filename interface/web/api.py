@@ -143,6 +143,10 @@ class WebRuntime:
         self.mcp = McpRuntime(self.lock, self._ensure_idle)
         self._load_sessions()
         saved_active = self.active_session_id
+        # The Agent above is a fresh instance. Clear the active pointer while
+        # bootstrapping so _activate_session won't persist its empty transcript
+        # over the saved active session before restoring that session's messages.
+        self.active_session_id = ""
         if saved_active in self.sessions:
             session = self.sessions[saved_active]
             project = self.projects.get(session.project_id or "")

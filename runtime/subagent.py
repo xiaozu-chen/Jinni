@@ -186,8 +186,16 @@ async def _run(task: str) -> tuple[str, int, int, int]:
         return result, child.stats["laps"], child.stats["prompt_tokens"] + child.stats["completion_tokens"], pointers
 
     try:
+        context_recovery_attempts = 0
         for _ in range(settings.subagent_max_laps):
-            content, calls, used = await child.stream_response()
+            try:
+                content, calls, used = await child.stream_response()
+            except Exception as error:
+                if child._is_context_overflow(error) and context_recovery_attempts < 2:
+                    if await child.compact_context_for_retry(context_recovery_attempts):
+                        context_recovery_attempts += 1
+                        continue
+                raise
             if used > settings.context_limit * 0.9:
                 return finish(ERROR_CONTEXT)
             if not calls:
