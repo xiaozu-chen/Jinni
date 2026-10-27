@@ -248,7 +248,7 @@ def test_responder_uses_agent_context_and_streams_user_facing_text(monkeypatch):
     assert requests[0]["messages"][3]["role"] == "tool"
     assert "tools" not in requests[0]
     assert [event.kind for event in events] == [
-        "responder_start", "text_delta", "status", "text_end",
+        "responder_start", "responder_delta", "status", "text_end",
     ]
 
 
@@ -459,9 +459,12 @@ def test_failure_after_tool_lap_rolls_back_whole_turn(monkeypatch):
 
 @pytest.fixture
 def ping_tool(monkeypatch):
+    import permission.policy as policy
+
     monkeypatch.setitem(TOOL_FUNCTIONS, "ping", lambda: "pong")
     monkeypatch.setattr(agent_mod, "NEEDS_APPROVAL", agent_mod.NEEDS_APPROVAL | {"ping"})
     monkeypatch.setattr(agent_mod, "REMEMBERABLE", agent_mod.REMEMBERABLE | {"ping"})
+    monkeypatch.setattr(policy, "NEEDS_APPROVAL", policy.NEEDS_APPROVAL | {"ping"})
 
 
 def test_always_allow_is_asked_only_once(ping_tool, monkeypatch):
@@ -687,6 +690,32 @@ def test_turn_uses_responder_after_tool_work(monkeypatch):
         "role": "assistant",
         "content": "I completed the requested work.",
     }
+
+
+def test_stop_requested_during_model_response_skips_proposed_tools(monkeypatch):
+    calls = [make_call("get_current_time", {})]
+    monkeypatch.setattr(
+        agent_mod, "settings", replace(agent_mod.settings, thinking_classifier_model=""),
+    )
+
+    async def stop_during_response(self, **kwargs):
+        self.stop_requested = True
+        return "", calls, 10
+
+    async def tools_must_not_run(self, _calls):
+        raise AssertionError("tools should not run after a stop request")
+
+    monkeypatch.setattr(Agent, "stream_response", stop_during_response)
+    monkeypatch.setattr(Agent, "run_tools", tools_must_not_run)
+    agent = Agent(no_memory=True, thinking_override=False)
+
+    asyncio.run(agent.chat("Check the current time."))
+
+    assert agent.messages[-1] == {
+        "role": "assistant",
+        "content": "Stopped before running the proposed actions.",
+    }
+    assert not any(message.get("tool_calls") for message in agent.messages)
 
 
 def test_start_subtask_keeps_a_short_reference_and_resets_history(monkeypatch, memory_store):

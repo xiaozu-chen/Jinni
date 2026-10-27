@@ -1,8 +1,18 @@
 import threading
+import tempfile
+from dataclasses import replace
+from pathlib import Path
 
 from fastapi.testclient import TestClient
+import pytest
 
 import interface.web.api as web_api
+
+
+@pytest.fixture(autouse=True)
+def isolate_session_store(monkeypatch, tmp_path):
+    monkeypatch.setattr(web_api, "WEB_SESSION_STORE", tmp_path / "web_sessions.json")
+    monkeypatch.setattr(web_api, "settings", replace(web_api.settings, mcp_enabled=False))
 
 
 class FakeAgent:
@@ -24,11 +34,10 @@ class FakeAgent:
     def apply_memory(self):
         pass
 
-    async def chat(self, message):
-        self.messages.extend([
-            {"role": "user", "content": message},
-            {"role": "assistant", "content": "Hello from Jinni."},
-        ])
+    async def chat(self, message, *, user_message_preloaded=False):
+        if not user_message_preloaded:
+            self.messages.append({"role": "user", "content": message})
+        self.messages.append({"role": "assistant", "content": "Hello from Jinni."})
         self.event_sink(web_api.AgentEvent("text_delta", "Hello from Jinni."))
 
 
@@ -59,6 +68,43 @@ def test_api_chat_and_session(monkeypatch, tmp_path):
         ]
         assert client.delete("/api/session").json() == {"cleared": True}
         assert client.get("/api/session").json()["messages"] == []
+
+
+def test_stop_request_declines_pending_interactions(monkeypatch, tmp_path):
+    monkeypatch.setattr(web_api, "Agent", FakeAgent)
+    monkeypatch.setattr(web_api, "load_approvals", lambda _path: set())
+    monkeypatch.setattr(web_api.workspace_tools, "DEFAULT_WORKSPACE", tmp_path)
+    runtime = web_api.WebRuntime()
+    runtime.busy = True
+    ready = threading.Event()
+    runtime.interactions["pending-approval"] = {
+        "ready": ready,
+        "kind": "approval",
+        "prompt": "allow write_file?",
+        "choices": "y/n",
+    }
+
+    runtime.request_stop_chat()
+
+    assert runtime.agent.stop_requested is True
+    assert ready.is_set()
+    assert runtime.interactions["pending-approval"]["answer"] == "abort"
+    assert runtime.events[-1]["text"] == "Stop requested. Waiting for the active action to finish."
+
+
+def test_chat_is_rejected_during_mcp_reconfiguration(monkeypatch, tmp_path):
+    monkeypatch.setattr(web_api, "Agent", FakeAgent)
+    monkeypatch.setattr(web_api, "load_approvals", lambda _path: set())
+    monkeypatch.setattr(web_api.workspace_tools, "DEFAULT_WORKSPACE", tmp_path)
+    runtime = web_api.WebRuntime()
+    runtime.mcp.reconfiguring = True
+
+    with pytest.raises(web_api.HTTPException) as error:
+        runtime.start_chat("Do some work")
+
+    assert error.value.status_code == 409
+    assert runtime.busy is False
+    assert not any(message.get("role") == "user" for message in runtime.agent.messages)
 
 
 def test_session_lifecycle_and_edit(monkeypatch, tmp_path):
@@ -193,6 +239,81 @@ def test_project_and_busy_validation(monkeypatch, tmp_path):
         runtime.busy = False
         assert client.post("/api/chat", json={"message": "  "}).status_code == 422
         assert client.post("/api/chat", json={"message": "x" * 12_001}).status_code == 422
+
+
+def test_import_review_and_apply_project_flow(monkeypatch, tmp_path):
+    monkeypatch.setattr(web_api, "Agent", FakeAgent)
+    monkeypatch.setattr(web_api, "load_approvals", lambda _path: set())
+    monkeypatch.setattr(web_api.workspace_tools, "DEFAULT_WORKSPACE", tmp_path / "workspace")
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "app.py").write_text("original\n", encoding="utf-8")
+
+    with TestClient(web_api.app) as client:
+        imported = client.post("/api/project/import", json={"path": str(source)})
+        assert imported.status_code == 200
+        assert imported.json()["project"] == str(source.resolve())
+        working = Path(imported.json()["working_copy"])
+        assert working != source
+        assert (source / "app.py").read_text(encoding="utf-8") == "original\n"
+
+        project = client.get("/api/workspace").json()["projects"][0]
+        (working / "app.py").write_text("reviewed\n", encoding="utf-8")
+        (working / "new.py").write_text("print('new')\n", encoding="utf-8")
+        review = client.get(f"/api/projects/{project['id']}/changes")
+        assert review.status_code == 200
+        assert review.json()["files"] == ["app.py", "new.py"]
+        assert "reviewed" in review.json()["diff"]
+
+        blocked = client.post(
+            f"/api/projects/{project['id']}/apply",
+            json={"snapshot_id": review.json()["snapshot_id"]},
+            headers={"Origin": "https://untrusted.example"},
+        )
+        assert blocked.status_code == 403
+        assert (source / "app.py").read_text(encoding="utf-8") == "original\n"
+
+        applied = client.post(
+            f"/api/projects/{project['id']}/apply",
+            json={"snapshot_id": review.json()["snapshot_id"]},
+        )
+        assert applied.status_code == 200
+        assert applied.json()["applied"] == ["app.py", "new.py"]
+        assert (source / "app.py").read_text(encoding="utf-8") == "reviewed\n"
+        assert (source / "new.py").read_text(encoding="utf-8") == "print('new')\n"
+        assert client.get(f"/api/projects/{project['id']}/changes").json()["files"] == []
+
+
+def test_project_handlers_import_review_and_apply_without_http_client(monkeypatch):
+    monkeypatch.setattr(web_api, "Agent", FakeAgent)
+    monkeypatch.setattr(web_api, "load_approvals", lambda _path: set())
+    with tempfile.TemporaryDirectory(dir=Path(__file__).resolve().parents[1]) as folder:
+        root = Path(folder)
+        monkeypatch.setattr(web_api, "WEB_SESSION_STORE", root / "web_sessions.json")
+        monkeypatch.setattr(web_api.workspace_tools, "DEFAULT_WORKSPACE", root / "workspace")
+        source = root / "source"
+        source.mkdir()
+        (source / "app.py").write_text("original\n", encoding="utf-8")
+        runtime = web_api.WebRuntime()
+
+        imported = web_api.import_project(web_api.ProjectRequest(path=str(source)), runtime)
+        project_id = next(iter(runtime.projects))
+        working = Path(imported["working_copy"])
+        (working / "app.py").write_text("reviewed\n", encoding="utf-8")
+        (working / "new.py").write_text("print('new')\n", encoding="utf-8")
+
+        review = web_api.get_project_changes(project_id, runtime)
+        assert review["files"] == ["app.py", "new.py"]
+        assert "reviewed" in review["diff"]
+
+        snapshot_id = review["snapshot_id"]
+        applied = web_api.apply_project_changes(
+            project_id, web_api.ProjectApplyRequest(snapshot_id=snapshot_id), runtime,
+        )
+        assert applied["applied"] == ["app.py", "new.py"]
+        assert (source / "app.py").read_text(encoding="utf-8") == "reviewed\n"
+        assert (source / "new.py").read_text(encoding="utf-8") == "print('new')\n"
+        assert web_api.get_project_changes(project_id, runtime)["files"] == []
 
 
 def test_reasoning_mode_model_thinking_and_actions(monkeypatch, tmp_path):

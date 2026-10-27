@@ -13,7 +13,7 @@ python -m pip install -r requirements-lock.txt -r requirements-dev.txt
 pre-commit install
 ```
 
-For server startup, see [RUNNING.md](RUNNING.md). For interactive and developer commands, see the [command reference](docs/COMMANDS.md).
+For setup and server startup, see [RUNNING.md](RUNNING.md). The CLI command list is available with `/help` during a session.
 
 Install Jinni as a command with `python -m pip install -e .`. Copy `settings.example.toml` to `settings.toml` to override defaults; `JINNI_SETTINGS` can point to another TOML file. Unknown keys and values with the wrong type are rejected at startup. Runtime memory and logs are stored under `data/memory/` and `data/logs/`. MCP server allowlists can be managed in `data/mcp_servers.json`.
 
@@ -84,4 +84,4 @@ Launch `jinni --project PATH` to copy a repository into `workspace/projects/` be
 
 Run `python -m server.mcp_server` from the project directory as an MCP stdio server. It exposes only `list_files`, `read_file`, and `recall`; file access stays inside the workspace. It has no write, web, or delete tools.
 
-For the Tauri desktop UI, run `python desktop_api.py` to start the loopback HTTP/SSE backend. See [DESKTOP_API.md](docs/DESKTOP_API.md) for the endpoint contract and event format.
+For the Tauri desktop UI, start the loopback API from the repository root with `python main.py --run-as web`, then launch the desktop UI. The UI polls the API on `127.0.0.1:8765`; the API is not bundled into or automatically started by the Tauri executable. See [the web API guide](docs/WEB_API.md) for the endpoints and safe project review workflow.

@@ -265,6 +265,7 @@ def test_cancelling_orchestrator_turn_cancels_delegate_and_rolls_back(monkeypatc
     started = asyncio.Event()
     subrun_cancelled = asyncio.Event()
     orchestrator = Agent()
+    orchestrator.thinking_override = False
     before = [message.copy() for message in orchestrator.messages]
 
     async def call_delegate(self):

@@ -277,6 +277,7 @@ class Agent:
         self.full_access_remaining = 0
         self.full_access_expires_at = 0.0
         self.write_checkpoint: str | None = None
+        self.stop_requested = False
         self.replay_recorder: "SessionRecorder | None" = None
         self.allowed_file = allowed_file
         self.project_active = project_active
@@ -328,14 +329,20 @@ class Agent:
         self.project_active = active
 
     def enable_auto_edit(self) -> None:
-        if not self.project_active:
+        from runtime.project import is_managed_project
+        from tools import workspace as workspace_tools
+
+        if not self.project_active or not is_managed_project(workspace_tools.WORKSPACE):
             raise ValueError("Auto-edit requires an active managed project.")
         self.approval_mode = "auto-edit"
 
     def enable_full_access(self) -> None:
+        from runtime.project import is_managed_project
+        from tools import workspace as workspace_tools
+
         if not settings.allow_full_access:
             raise ValueError("Full Access is disabled by allow_full_access = false.")
-        if not self.project_active:
+        if not self.project_active or not is_managed_project(workspace_tools.WORKSPACE):
             raise ValueError("Full Access requires an active managed project.")
         if self.session_tainted:
             raise ValueError("This session is tainted; start a fresh chat before enabling Full Access.")
@@ -542,13 +549,18 @@ class Agent:
             ))
             return result
 
-        if run_parallel:
+        if self.stop_requested:
+            results = ["Stopped before this action started." for _ in calls]
+        elif run_parallel:
             results = list(await asyncio.gather(
                 *(one(c, a, r) for c, (a, r) in zip(calls, plans))
             ))
         else:
             results = []
             for c, (a, r) in zip(calls, plans):
+                if self.stop_requested:
+                    results.append("Stopped before this action started.")
+                    continue
                 results.append(await one(c, a, r))
 
         if runnable:
@@ -835,6 +847,10 @@ class Agent:
         did_work = False
         step_limit = max(1, settings.max_steps)
         while True:
+            if self.stop_requested:
+                self.emit(AgentEvent("status", "(stopped; no further actions will run)"))
+                self.messages.append({"role": "assistant", "content": "Stopped. No further actions will run."})
+                return
             if step >= step_limit:
                 try:
                     answer = (await asyncio.to_thread(
@@ -843,6 +859,10 @@ class Agent:
                     )).strip().lower()
                 except (EOFError, KeyboardInterrupt):
                     answer = "abort"
+                if self.stop_requested:
+                    self.emit(AgentEvent("status", "(stopped; no further actions will run)"))
+                    self.messages.append({"role": "assistant", "content": "Stopped. No further actions will run."})
+                    return
                 if answer in {"continue", "y"}:
                     step_limit += max(1, settings.max_steps)
                     self.emit(AgentEvent("status", "  (continuing for another step block)"))
@@ -866,6 +886,14 @@ class Agent:
                 self.emit(AgentEvent("status", "  (that whole turn was dropped, send your message again)"))
                 return
 
+            if self.stop_requested and calls:
+                self.emit(AgentEvent("status", "(stopped before running the proposed actions)"))
+                self.messages.append({
+                    "role": "assistant",
+                    "content": content or "Stopped before running the proposed actions.",
+                })
+                return
+
             self.emit(AgentEvent(
                 "status",
                 f"  (context: {used}/{settings.context_limit})",
@@ -885,6 +913,13 @@ class Agent:
                     self.emit(AgentEvent("status", "  (could not summarize, continuing without it)"))
 
             if not calls:
+                if self.stop_requested:
+                    self.emit(AgentEvent("status", "(stopped; no further actions will run)"))
+                    self.messages.append({
+                        "role": "assistant",
+                        "content": content or "Stopped. No further actions will run.",
+                    })
+                    return
                 if did_work:
                     if not await self._append_responder_reply(content):
                         return
@@ -914,4 +949,8 @@ class Agent:
                     "tool_call_id": c.id,
                     "content": result,
                 })
+            if self.stop_requested:
+                self.emit(AgentEvent("status", "(stopped after the active action finished)"))
+                self.messages.append({"role": "assistant", "content": "Stopped. No further actions will run."})
+                return
             step += 1

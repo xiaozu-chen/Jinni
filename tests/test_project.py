@@ -4,8 +4,9 @@ import tempfile
 import pytest
 
 from runtime.project import (
-    checkpoint_before_write, copy_project, create_project, list_projects,
-    load_project_guidance, select_project, undo_last_checkpoint,
+    apply_project_changes, checkpoint_before_write, copy_project, create_project,
+    list_projects, load_project_guidance, project_changes, select_project,
+    undo_last_checkpoint,
 )
 
 
@@ -80,6 +81,100 @@ def test_project_copy_skips_symlinks_to_keep_original_out_of_reach(project_tmp_p
 
     assert not (copied / "linked.txt").exists()
     assert outside.read_text(encoding="utf-8") == "original"
+
+
+def test_changes_review_and_apply_uses_baseline_and_advances_it(project_tmp_path):
+    source = project_tmp_path / "source"
+    source.mkdir()
+    (source / ".gitignore").write_text("local.env\n", encoding="utf-8")
+    (source / "app.py").write_text("before\n", encoding="utf-8")
+    (source / "local.env").write_text("secret=original\n", encoding="utf-8")
+    (source / "remove.txt").write_text("remove me\n", encoding="utf-8")
+    working = copy_project(source, project_tmp_path / "workspace" / "projects")
+
+    assert project_changes(working)["files"] == []
+    (working / "app.py").write_text("after\n", encoding="utf-8")
+    (working / "local.env").write_text("secret=updated\n", encoding="utf-8")
+    (working / "new.py").write_text("print('new')\n", encoding="utf-8")
+    (working / "remove.txt").unlink()
+
+    review = project_changes(working)
+    assert review["files"] == ["app.py", "local.env", "new.py", "remove.txt"]
+    assert len(review["snapshot_id"]) == 64
+    assert "secret=updated" not in (source / "local.env").read_text(encoding="utf-8")
+    result = apply_project_changes(working, source, expected_snapshot_id=review["snapshot_id"])
+
+    assert result["applied"] == ["app.py", "local.env", "new.py", "remove.txt"]
+    assert result["conflicts"] == []
+    assert (source / "app.py").read_text(encoding="utf-8") == "after\n"
+    assert (source / "local.env").read_text(encoding="utf-8") == "secret=updated\n"
+    assert (source / "new.py").read_text(encoding="utf-8") == "print('new')\n"
+    assert not (source / "remove.txt").exists()
+    assert project_changes(working)["files"] == []
+
+    (working / "app.py").write_text("second change\n", encoding="utf-8")
+    assert apply_project_changes(working, source)["applied"] == ["app.py"]
+    assert (source / "app.py").read_text(encoding="utf-8") == "second change\n"
+
+
+def test_apply_rejects_changes_since_review(project_tmp_path):
+    source = project_tmp_path / "source"
+    source.mkdir()
+    (source / "app.py").write_text("before\n", encoding="utf-8")
+    working = copy_project(source, project_tmp_path / "workspace" / "projects")
+    (working / "app.py").write_text("reviewed\n", encoding="utf-8")
+    snapshot_id = project_changes(working)["snapshot_id"]
+    (working / "app.py").write_text("changed after review\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="changed after review"):
+        apply_project_changes(working, source, expected_snapshot_id=snapshot_id)
+
+    assert (source / "app.py").read_text(encoding="utf-8") == "before\n"
+
+
+def test_apply_rejects_working_copy_change_during_transaction(project_tmp_path, monkeypatch):
+    import runtime.project as project_module
+
+    source = project_tmp_path / "source"
+    source.mkdir()
+    (source / "app.py").write_text("before\n", encoding="utf-8")
+    working = copy_project(source, project_tmp_path / "workspace" / "projects")
+    working_file = working / "app.py"
+    working_file.write_text("reviewed\n", encoding="utf-8")
+
+    read_project_file = project_module._read_project_file
+    changed = False
+
+    def change_working_copy_when_source_is_checked(target):
+        nonlocal changed
+        if target == source / "app.py" and not changed:
+            changed = True
+            working_file.write_text("edited during apply\n", encoding="utf-8")
+        return read_project_file(target)
+
+    monkeypatch.setattr(project_module, "_read_project_file", change_working_copy_when_source_is_checked)
+
+    with pytest.raises(ValueError, match="changed in the working copy while applying"):
+        apply_project_changes(working, source)
+
+    assert (source / "app.py").read_text(encoding="utf-8") == "before\n"
+
+
+def test_apply_project_changes_blocks_all_files_when_source_conflicts(project_tmp_path):
+    source = project_tmp_path / "source"
+    source.mkdir()
+    (source / "app.py").write_text("imported\n", encoding="utf-8")
+    working = copy_project(source, project_tmp_path / "workspace" / "projects")
+    (working / "app.py").write_text("agent version\n", encoding="utf-8")
+    (working / "new.py").write_text("agent addition\n", encoding="utf-8")
+    (source / "app.py").write_text("user version\n", encoding="utf-8")
+
+    result = apply_project_changes(working, source)
+
+    assert result["applied"] == []
+    assert result["conflicts"] == ["app.py"]
+    assert (source / "app.py").read_text(encoding="utf-8") == "user version\n"
+    assert not (source / "new.py").exists()
 
 
 def test_project_copy_refuses_an_existing_name_and_recursive_destination(project_tmp_path):
