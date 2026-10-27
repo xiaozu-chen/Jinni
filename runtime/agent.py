@@ -6,6 +6,7 @@ import asyncio
 import json
 import time
 import logging
+import re
 from collections import Counter
 from typing import TYPE_CHECKING, Any, Callable
 
@@ -31,7 +32,7 @@ from permission.audit import record_call
 from permission.approval_preview import summarize_arguments
 from permission.approval_store import save_approvals
 from permission.policy import (
-    FULL_ACCESS_BUDGET, FULL_ACCESS_SECONDS, SESSION_TAINTED,
+    ALWAYS_PROMPT_TOOLS, FULL_ACCESS_BUDGET, FULL_ACCESS_SECONDS, SESSION_TAINTED,
     ApprovalMode, describe_tool, permission_decision, taints_session,
 )
 from runtime.agent_events import AgentEvent, EventSink
@@ -58,22 +59,44 @@ RESPONDER_ROLE_PROMPT = (
     "tool results. Do not call tools or expose hidden reasoning."
 )
 WORKSPACE_FILE_GUIDANCE = (
-    "Local files: When a managed project is active, use find_files or list_files to search "
-    "that project's workspace before answering local-file requests, then use read_file to "
-    "inspect matching files. For an inventory use find_files(pattern='**/*'); for CSV "
-    "discovery use find_files(pattern='*.csv'). If the user names files to compare, read "
-    "each named file and compare them; do not ask what they want done when they already "
-    "said compare. Use web_search only for online research, never for local file discovery. "
-    "Use recall only for saved memories from earlier sessions, never to locate files. Use "
-    "ask_user only when a missing detail prevents an action. With no active project, ask "
-    "the user to select a project in the frontend; do not claim to search files or see chat "
-    "attachments. If project search finds no match, say that you checked and ask for a path. "
+    "Workspace files: In Projects, the active workspace is the user's selected project; use "
+    "find_files or list_files before answering local-file requests and read named files before "
+    "comparing them. In Chats, the active workspace is a private backend folder for this chat "
+    "only; use it freely for generated data, charts, and presentations, but it is not the "
+    "user's computer or a repository. Ask the user to open Projects or attach files when a "
+    "request requires their local files. Chat workspaces cannot run project commands. For an "
+    "inventory use find_files(pattern='**/*'); for CSV discovery use find_files(pattern='*.csv'). "
+    "If the user names files to compare, read each named file and compare them; do not ask "
+    "what they want done when they already said compare. Use web_search only for online "
+    "research, never for local-file discovery. Use recall only for saved memories from earlier "
+    "sessions, never to locate files. Use ask_user only when a missing detail prevents an action. "
+    "If project search finds no match, say that you checked and ask for a path. "
     "Never claim to have checked without actually searching. For code changes to an existing file, "
     "read it first and make the smallest targeted edit with edit_file or apply_patch; do not replace "
     "the whole file with write_file. Preserve unrelated code and formatting. After fixing a code error, "
     "inspect the affected section and run the relevant tests or a focused command when available. "
     "Report which checks actually ran and their results; never imply a check ran when it did not. "
-    "Approval modes are controlled by the user at the CLI; never request or attempt to change them."
+    "For data retrieval or chart requests, use one focused web_search query for a primary source "
+    "or a direct dataset/API endpoint; do not search for CSVs as an end in itself. Inspect a "
+    "relevant source with fetch_url when its labels, year, units, or methodology need confirmation, "
+    "then use fetch_table once to save its HTML table, CSV, or JSON records as a provenance-tracked "
+    "workspace CSV; when the source is larger than the chart limit, sort by the relevant data column "
+    "and set row_limit before saving. Use make_chart directly on that file. Choose scatter for the "
+    "relationship between two numeric columns, bubble when a third numeric column should control "
+    "bubble area, and heatmap for a categorical matrix represented as one row per row/column/value "
+    "cell. Heatmaps need row_column, x_column and one numeric y_column; keep their matrix at or below "
+    "24 by 36. Choose line for numeric trends over ordered dates, and bar for category comparisons. "
+    "Do not use pie/donut for many categories or unrelated values. The chart renderer supports at most "
+    "50 points for ordinary charts and 1,000 heatmap cells. Prefer source pages and structured "
+    "records over search snippets; use snippet-derived numbers only as clearly labeled, unverified "
+    "fallbacks when a suitable source dataset cannot be retrieved. If a source fails, try at most "
+    "one alternate relevant source, then explain what is unavailable instead of repeating broad "
+    "searches. For a trend, retrieve multiple dates; a single-year snapshot cannot show change over time. "
+    "If a request asks for every country as a separate line, explain that the chart currently supports "
+    "at most six series and offer a smaller country subset or one aggregated global trend. Do not say "
+    "the dataset is unavailable just because it is an API or paginated. Tell the user the source, date, "
+    "units, and any subset or row limit applied. "
+    "Approval modes are controlled by the user interface; never request or attempt to change them."
 )
 
 
@@ -157,6 +180,7 @@ def authorize(
     *,
     mode: ApprovalMode | str = "ask",
     project_active: bool = True,
+    workspace_kind: str = "project",
     tainted: bool = False,
     on_accepted: Callable[[], None] | None = None,
 ) -> tuple[dict[str, Any] | None, str]:
@@ -180,14 +204,17 @@ def authorize(
     scope = SCOPES[call.name](args) if call.name in SCOPES else "*"
     key = (call.name, scope)
     policy_tool = describe_tool(call.name, mcp_remembered=call.name in REMEMBERABLE)
-    decision = permission_decision(policy_tool, mode, project_active, tainted)
+    decision = permission_decision(policy_tool, mode, project_active, tainted, workspace_kind)
     if decision == "deny":
         return None, f"Error: policy denies access to '{call.name}' in this context."
 
     if call.name in ("fetch_url", "fetch_table") and not is_trusted_url(str(args.get("url", ""))):
         return None, "Error: fetch only URLs you supplied or that appeared in a search result."
     
-    auto_approved = decision == "allow" or (decision == "ask" and key in allowed and not tainted)
+    manual_only = call.name in ALWAYS_PROMPT_TOOLS
+    auto_approved = decision == "allow" or (
+        decision == "ask" and key in allowed and not tainted and not manual_only
+    )
     if call.name in NEEDS_APPROVAL:
         if call.name in ("write_file", "edit_file", "apply_patch"):
             syntax_error = validate_python_change(call.name, args)
@@ -201,7 +228,7 @@ def authorize(
                 if emit:
                     emit(notice)
         if not auto_approved:
-            can_remember = call.name in REMEMBERABLE and scope != ""
+            can_remember = call.name in REMEMBERABLE and scope != "" and not manual_only
             if can_remember:
                 what = "this session" if scope == "*" else f"{scope} this session"
                 choices = f"y/n/a=always allow {what}"
@@ -247,8 +274,10 @@ class Agent:
 
     def __init__(self, store: MemoryStore | None = None, project_guidance: str = "",
                  allowed_file=None, project_active: bool | None = None,
-                 event_sink: EventSink | None = None, *, system_prompt: str | None = None,
+                 event_sink: EventSink | None = None, *, workspace_kind: str = "project",
+                 system_prompt: str | None = None,
                  tool_menu: set[str] | None = None, quiet: bool = False,
+                 inline_presentations: bool = False,
                  thinking_override: bool | None = None, no_memory: bool = False,
                  redact_tool_results: bool = False,
                  session_tainted: bool = False,
@@ -278,7 +307,7 @@ class Agent:
         self.thinking_source = "default" if thinking_override is None else "manual"
         self.parallel_tools: bool = settings.parallel_tools
         self.allowed: set[tuple[str, str]] = set()
-        self.approval_mode: ApprovalMode = "ask"
+        self.approval_mode: ApprovalMode = "auto"
         self.session_tainted = session_tainted
         self.full_access_remaining = 0
         self.full_access_expires_at = 0.0
@@ -287,9 +316,11 @@ class Agent:
         self.replay_recorder: "SessionRecorder | None" = None
         self.allowed_file = allowed_file
         self.project_active = project_active
+        self.workspace_kind = workspace_kind
         self.event_sink = event_sink
         self.quiet = quiet
         self.tool_menu = None if tool_menu is None else set(tool_menu)
+        self.inline_presentations = inline_presentations
         self.no_memory = no_memory
         self.redact_tool_results = redact_tool_results
         self.interaction_provider = interaction_provider
@@ -335,11 +366,10 @@ class Agent:
         self.project_active = active
 
     def enable_auto_edit(self) -> None:
-        from runtime.project import is_managed_project
         from tools import workspace as workspace_tools
 
-        if not self.project_active or not is_managed_project(workspace_tools.WORKSPACE):
-            raise ValueError("Auto-edit requires an active managed project.")
+        if self.workspace_kind != "project" or not self.project_active or not workspace_tools.WORKSPACE.is_dir():
+            raise ValueError("Auto-edit requires an active project folder.")
         self.approval_mode = "auto-edit"
 
     def enable_full_access(self) -> None:
@@ -348,7 +378,7 @@ class Agent:
 
         if not settings.allow_full_access:
             raise ValueError("Full Access is disabled by allow_full_access = false.")
-        if not self.project_active or not is_managed_project(workspace_tools.WORKSPACE):
+        if self.workspace_kind != "project" or not self.project_active or not is_managed_project(workspace_tools.WORKSPACE):
             raise ValueError("Full Access requires an active managed project.")
         if self.session_tainted:
             raise ValueError("This session is tainted; start a fresh chat before enabling Full Access.")
@@ -378,7 +408,7 @@ class Agent:
             self.safe_mode("the 30-minute limit expired")
 
     def visible_tool_names(self) -> set[str]:
-        visible = tool_names(self.project_active)
+        visible = tool_names(self.project_active, self.workspace_kind)
         if self.tool_menu is not None:
             visible &= self.tool_menu
         return visible
@@ -464,7 +494,9 @@ class Agent:
         for call in calls:
             self.refresh_approval_mode()
             # The schema only suggests tools; this executor check is the actual fence, nya.
-            if self.tool_menu is not None and call.name not in self.tool_menu:
+            if call.name not in self.visible_tool_names():
+                plans.append((None, "Error: that tool is not available in this workspace."))
+            elif self.tool_menu is not None and call.name not in self.tool_menu:
                 plans.append((None, "Error: that tool is not available to a subagent."))
             elif self.project_active is False and TOOL_GROUPS.get(call.name) == "project":
                 plans.append((None, "Error: project tools are available only after selecting a project."))
@@ -472,12 +504,14 @@ class Agent:
                 plans.append(await asyncio.to_thread(
                     authorize, call, self.allowed, self.emit, self._approval_input,
                     mode=self.approval_mode, project_active=bool(self.project_active),
+                    workspace_kind=self.workspace_kind,
                     tainted=self.session_tainted, on_accepted=self._consume_full_access_call,
                 ))
             else:
                 plans.append(authorize(
                     call, self.allowed, self.emit,
                     mode=self.approval_mode, project_active=bool(self.project_active),
+                    workspace_kind=self.workspace_kind,
                     tainted=self.session_tainted, on_accepted=self._consume_full_access_call,
                 ))
             if plans[-1][0] is not None and taints_session(describe_tool(call.name)) and not self.session_tainted:
@@ -485,7 +519,10 @@ class Agent:
                 if self.approval_mode == "full-access":
                     self.safe_mode("untrusted content entered the session")
                 else:
-                    self.emit(AgentEvent("status", "  [safety] This session is now tainted; auto-approval is disabled."))
+                    self.emit(AgentEvent(
+                        "status",
+                        "  [safety] Untrusted content was received; file changes, downloads, commands, and other risky actions still require approval.",
+                    ))
         if self.allowed_file and self.allowed != previous_approvals:
             try:
                 save_approvals(self.allowed_file, self.allowed)
@@ -507,22 +544,33 @@ class Agent:
                 "action_started", call.name, details,
             ))
             if args is None:
+                log.info("tool rejected: %s -> %s", call.name, refusal[:200])
                 self.emit(AgentEvent(
                     "action_completed",
                     call.name,
                     {"name": call.name, "call_id": call.id, "success": False},
                 ))
                 return refusal
+            auto_edit_checkpoint = False
             if call.name in CHECKPOINTED_WRITES:
                 try:
                     import runtime.project as project
                     from tools import workspace as workspace_tools
-
-                    checkpoint = await asyncio.to_thread(
-                        project.checkpoint_before_write, call.name, workspace_tools.WORKSPACE
-                    )
-                    if checkpoint:
+                    if self.approval_mode == "auto-edit" and call.name in {"write_file", "edit_file", "apply_patch"}:
+                        auto_edit_checkpoint = True
+                        checkpoint = await asyncio.to_thread(
+                            project.begin_auto_edit_checkpoint,
+                            call.name,
+                            workspace_tools.WORKSPACE,
+                            args,
+                        )
                         self.write_checkpoint = checkpoint
+                    else:
+                        checkpoint = await asyncio.to_thread(
+                            project.checkpoint_before_write, call.name, workspace_tools.WORKSPACE
+                        )
+                        if checkpoint:
+                            self.write_checkpoint = checkpoint
                 except (OSError, ValueError) as error:
                     self.emit(AgentEvent(
                         "action_completed",
@@ -540,6 +588,13 @@ class Agent:
             finally:
                 SESSION_TAINTED.reset(taint_token)
                 USER_INPUT_PROVIDER.reset(token)
+            if auto_edit_checkpoint and checkpoint:
+                try:
+                    await asyncio.to_thread(
+                        project.finish_auto_edit_checkpoint, checkpoint, workspace_tools.WORKSPACE
+                    )
+                except (OSError, ValueError) as error:
+                    result += f"\nWarning: the file change ran, but its undo checkpoint could not be finalized ({error})."
             name = call.name.lower()
             if name in {"web_search", "search_snippets_for_chart"} or name.endswith("_search_text"):
                 trust_urls_from_text(result)
@@ -582,7 +637,9 @@ class Agent:
         first: float | None = None
         generated = 0
         request_messages = json.loads(json.dumps(self.messages, ensure_ascii=False))
-        request_tools = json.loads(json.dumps(tool_schemas(self.project_active, self.tool_menu), ensure_ascii=False))
+        request_tools = json.loads(json.dumps(
+            tool_schemas(self.project_active, self.tool_menu, self.workspace_kind), ensure_ascii=False
+        ))
         estimated_prompt_tokens = max(1, (len(json.dumps(
             {"messages": request_messages, "tools": request_tools}, ensure_ascii=False,
         )) + 3) // 4)
@@ -712,6 +769,13 @@ class Agent:
         response_messages[0]["content"] = (
             str(response_messages[0]["content"]) + "\n\n" + RESPONDER_ROLE_PROMPT
         )
+        if self.inline_presentations:
+            response_messages[0]["content"] += (
+                "\n\nWhen a make_chart result names a chart file under charts/, embed it inline by "
+                "including the exact token [[jinni-chart:charts/<filename>.html]] on its own line "
+                "where it belongs. Use the exact generated filename; never invent one. Write normal "
+                "introductory and follow-up text around the embedded chart."
+            )
         if draft.strip():
             response_messages.append({"role": "assistant", "content": draft})
 
@@ -742,7 +806,9 @@ class Agent:
                 if text:
                     streamed_chars += len(text)
                     reply_parts.append(text)
-                    self.emit(AgentEvent("responder_delta", text))
+                    # Use the same delta event as ordinary assistant output so
+                    # every client streams Responder chunks through its standard path.
+                    self.emit(AgentEvent("text_delta", text))
                     estimate = min(
                         settings.context_limit,
                         estimated_prompt_tokens + (streamed_chars + 3) // 4,
@@ -761,6 +827,23 @@ class Agent:
             await stream.close()
 
         reply = "".join(reply_parts).strip()
+        if self.inline_presentations:
+            chart_paths = []
+            for message in self.messages:
+                content = message.get("content")
+                if message.get("role") == "tool" and isinstance(content, str):
+                    chart_paths.extend(re.findall(
+                        r"Saved the chart to (charts/[A-Za-z0-9_-]{1,100}\.html)", content
+                    ))
+            markers = [
+                f"[[jinni-chart:{path}]]"
+                for path in dict.fromkeys(chart_paths)
+                if f"[[jinni-chart:{path}]]" not in reply
+            ]
+            if markers:
+                addition = "\n\n" + "\n\n".join(markers) + "\n\nThe chart is embedded above."
+                reply = reply.rstrip() + addition
+                self.emit(AgentEvent("text_delta", addition))
         if not reply:
             raise RuntimeError("Responder returned an empty response.")
         self.context_used = used or self.context_used
@@ -1000,6 +1083,8 @@ class Agent:
 
         step = 0
         did_work = False
+        last_failed_tool: tuple[str, str, str] | None = None
+        repeated_failure_count = 0
         context_recovery_attempts = 0
         step_limit = max(1, settings.max_steps)
         while True:
@@ -1119,6 +1204,29 @@ class Agent:
                     "tool_call_id": c.id,
                     "content": result,
                 })
+                if result.startswith("Error:"):
+                    try:
+                        arguments = json.dumps(json.loads(c.arguments or "{}"), sort_keys=True)
+                    except (json.JSONDecodeError, TypeError):
+                        arguments = c.arguments
+                    failed_signature = (c.name, arguments, result)
+                    if failed_signature == last_failed_tool:
+                        repeated_failure_count += 1
+                    else:
+                        last_failed_tool = failed_signature
+                        repeated_failure_count = 1
+                    if repeated_failure_count >= 2:
+                        message = (
+                            f"I stopped retrying {c.name} because the same action failed twice. "
+                            f"{result} Try a source URL from the search results or narrow the request."
+                        )
+                        log.warning("stopped turn after repeated identical tool failure: %s", c.name)
+                        self.messages.append({"role": "assistant", "content": message})
+                        self.emit(AgentEvent("error", message))
+                        return
+                else:
+                    last_failed_tool = None
+                    repeated_failure_count = 0
             if self.stop_requested:
                 self.emit(AgentEvent("status", "(stopped after the active action finished)"))
                 self.messages.append({"role": "assistant", "content": "Stopped. No further actions will run."})

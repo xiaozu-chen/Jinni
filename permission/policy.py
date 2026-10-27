@@ -6,7 +6,7 @@ from typing import Literal
 
 from tools.registry import NEEDS_APPROVAL, TOOL_GROUPS
 
-ApprovalMode = Literal["ask", "auto-edit", "full-access"]
+ApprovalMode = Literal["ask", "auto", "auto-edit", "full-access"]
 Decision = Literal["allow", "ask", "deny"]
 
 
@@ -19,6 +19,10 @@ class ToolPolicy:
     mcp_remembered: bool = False
 
 AUTO_EDIT_TOOLS = frozenset({"write_file", "edit_file", "apply_patch"})
+SAFE_RESEARCH_TOOLS = frozenset({"web_search", "fetch_url"})
+ALWAYS_PROMPT_TOOLS = frozenset({
+    "fetch_table", "search_snippets_for_chart",
+})
 ISOLATED_COMMAND_TOOLS = frozenset({"run_tests", "run_powershell"})
 TAINTING_TOOLS = frozenset({
     "fetch_url", "fetch_table", "web_search", "search_snippets_for_chart", "recall",
@@ -35,7 +39,8 @@ It remains blocked from files outside the project, private network addresses, un
 MCP tools, and deleting files. Isolated commands may run without an approval prompt.
 
 Web pages, search results, remembered notes, and MCP results can contain malicious instructions.
-As soon as one of those sources is used, Full Access turns off and approvals are required again.
+As soon as one of those sources is used, Full Access turns off. Approval is still required for
+file changes, downloads, commands, and other risky actions; basic web search and page reads stay automated.
 
 Full Access expires after 20 tool calls or 30 minutes. Type FULL ACCESS to enable it; anything
 else cancels."""
@@ -59,10 +64,22 @@ def permission_decision(
     mode: ApprovalMode | str,
     project: bool,
     tainted: bool,
+    workspace_kind: str = "project",
 ) -> Decision:
     """Return allow/ask/deny without reading or changing session state."""
-    if tool.name in NEVER_AVAILABLE_TOOLS:
+    if tool.name in NEVER_AVAILABLE_TOOLS and not (
+        workspace_kind == "chat" and tool.name == "delete_file"
+    ):
         return "deny"
+    if tool.name in ALWAYS_PROMPT_TOOLS:
+        return "ask"
+    if tool.name in SAFE_RESEARCH_TOOLS:
+        return "ask" if mode == "ask" else "allow"
+    if workspace_kind == "chat" and mode != "ask":
+        from tools.registry import CHAT_WORKSPACE_TOOLS
+
+        if tool.name in CHAT_WORKSPACE_TOOLS and tool.name not in ALWAYS_PROMPT_TOOLS:
+            return "allow"
     group = tool.group
     if group == "project" and not project:
         return "deny"

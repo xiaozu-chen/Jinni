@@ -13,9 +13,11 @@ from tools.registry import tool_names
         ("apply_patch", "full-access", True, True, False, False, "ask"),
         ("write_file", "full-access", False, False, False, False, "deny"),
         ("fetch_url", "ask", True, False, False, False, "ask"),
-        ("fetch_url", "auto-edit", True, False, False, False, "ask"),
+        ("fetch_url", "auto", False, False, False, False, "allow"),
+        ("fetch_url", "auto-edit", True, False, False, False, "allow"),
         ("fetch_url", "full-access", True, False, False, False, "allow"),
-        ("web_search", "full-access", True, True, False, False, "ask"),
+        ("web_search", "full-access", True, True, False, False, "allow"),
+        ("fetch_table", "full-access", True, False, False, False, "ask"),
         ("run_powershell", "full-access", True, False, False, False, "ask"),
         ("run_powershell", "full-access", True, False, True, False, "allow"),
         ("remember", "full-access", True, False, False, False, "ask"),
@@ -45,9 +47,11 @@ def test_mcp_is_asked_unless_its_user_config_marks_it_rememberable():
     assert permission_decision(remembered, "full-access", True, False) == "allow"
 
 
-def test_approval_mode_never_overrides_taint_for_auto_approval():
-    for mode in ("ask", "auto-edit", "full-access"):
+def test_taint_blocks_file_auto_approval_but_not_safe_research():
+    for mode in ("ask", "auto", "auto-edit", "full-access"):
         assert permission_decision(ToolPolicy("write_file", True, group="project"), mode, True, True) == "ask"
+        expected_research = "ask" if mode == "ask" else "allow"
+        assert permission_decision(ToolPolicy("web_search", True), mode, False, True) == expected_research
 
 
 def test_free_form_command_is_not_allowed_by_full_access_without_isolation():

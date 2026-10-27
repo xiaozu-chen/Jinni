@@ -40,7 +40,7 @@ From the repository root:
 python main.py --run-as cli
 ```
 
-Or run `python -m interface.cli.jinni`. Type `exit` to leave. `/help` lists the CLI commands. Use `/project PATH` to work on a managed copy of a repository; without a selected project, Jinni uses its regular `workspace` folder.
+Or run `python -m interface.cli.jinni`. Type `exit` to leave. `/help` lists the CLI commands. Use `/project PATH` or `--project PATH` to work directly in that folder; without a selected project, Jinni uses its regular `workspace` folder.
 
 To run the web API instead, install its dependencies and start it with:
 
@@ -51,15 +51,15 @@ python main.py --run-as web
 
 The API listens on `127.0.0.1:8765`. For the Tauri desktop app, keep this backend running in the background, then launch the app. The desktop executable does not start or bundle the Python backend. See [the web API guide](docs/WEB_API.md).
 
-The Tauri UI imports a selected folder into `workspace/projects/` as an isolated, Jinni-managed copy. Agent edits and Git checkpoints stay in that copy; the original folder is not modified. Use **Review changes** in the chat header to compare edits with the imported baseline and download the diff. **Apply all N files to source** applies every eligible file in the current review; the confirmation lists those files. Apply is rejected if the working copy changes after review or any source file conflicts with the imported baseline. Binary files, files larger than 1 MB, and diffs beyond the display limit need to be reviewed and applied with Git or another file tool directly.
+In the Tauri UI, Chats use separate durable workspaces under backend `data/chat_workspaces/`; Jinni can research and create or manage files, charts, and presentations there without routine prompts. Saving downloaded table/snippet data and external MCP actions still asks. Project commands and Full Access are unavailable in Chats. Project chats use the selected folder directly and default to Ask; Auto-edit and Full Access are separate project-only modes. Auto-edit uses before-images in backend `data/auto_edit_checkpoints`, and undo refuses to overwrite a file changed after Jinni's edit. Full Access remains limited to Jinni-managed projects with Git checkpoints and stays disabled unless explicitly enabled in backend settings. Older isolated copies are retained on disk during migration and are not used for new work; unreviewed edits in them are not copied into the original folder. Generated charts in web chats are shown inline in a sandboxed iframe.
 
 While a turn is running, use **Stop** to ask Jinni to stop at the next safe boundary. A pending approval is declined, newly proposed tools are skipped, and an already-running tool is allowed to finish before the turn stops; stopping does not interrupt an active shell or file operation.
 
-Enter `/help` in the CLI for the current slash-command list. Use `/project PATH` to work on an isolated project copy.
+Enter `/help` in the CLI for the current slash-command list. Use `/project PATH` to work directly in that folder.
 
 Thinking is off by default. `/think` toggles a manual override for the current session. The read-only `delegate` helper is disabled by default; enabling `subagents_enabled` in `settings.toml` exposes it.
 
-Approval modes are session-only: `/mode ask` uses approval prompts, while `/mode auto-edit` skips prompts only for checkpointed edits in the active managed project. Full Access is disabled by default. To enable it, add `allow_full_access = true` to `settings.toml`; the CLI and web UI then show the warning and require typing `FULL ACCESS`. It expires after 20 tool calls or 30 minutes, and `/safe` or Ctrl+C reverts it. Web, MCP, and saved-memory results taint the session and turn Full Access off. In the web UI, approval-bypass modes are available only when the selected folder is a Jinni-managed project with reversible Git checkpoints; arbitrary folders remain in Ask mode.
+Approval modes are session-only: `/mode auto` (the default) approves web search and public page reads; `/mode ask` restores prompts for file changes and risky actions; `/mode auto-edit` additionally auto-approves checkpointed project file edits. Downloaded table/snippet data still asks for approval. Full Access is disabled by default. To enable it, add `allow_full_access = true` to `settings.toml`; the CLI and web UI then show the warning and require typing `FULL ACCESS`. It expires after 20 tool calls or 30 minutes, and `/safe` or Ctrl+C reverts it. Web, MCP, and saved-memory results taint the session and turn Full Access off. Full Access continues to require a Jinni-managed project with reversible Git checkpoints.
 
 To choose thinking automatically, run a small OpenAI-compatible chat model on a separate local endpoint (port 8082 by default), then set `thinking_classifier_model` to the model name served there and `thinking_classifier_base_url` to that endpoint in `settings.toml`. The classifier sees only the latest user message and must answer `on` or `off`; if it is unavailable or returns an invalid label, Jinni uses `thinking_default`. `/think on` and `/think off` set a session override; `/think auto` returns control to the classifier.
 

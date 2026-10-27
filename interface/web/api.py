@@ -1,7 +1,6 @@
 """Runtime coordination and application composition for the local web API."""
 
 import asyncio
-import hashlib
 import json
 import logging
 import os
@@ -16,20 +15,22 @@ from uuid import uuid4
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 
 from permission.policy import FULL_ACCESS_BUDGET, FULL_ACCESS_SECONDS, FULL_ACCESS_WARNING
 from permission.approval_store import load_approvals
 from runtime.agent import Agent
 from runtime.agent_events import AgentEvent
 from runtime.project import (
-    copy_project,
     apply_project_changes as apply_reviewed_project_changes,
+    latest_auto_edit_checkpoint,
     is_managed_project,
     load_project_guidance,
     project_changes as read_project_changes,
+    restore_auto_edit_checkpoint,
 )
 from settings.config import settings
+from presentation.svgcharts import is_genuine_page
 import tools.workspace as workspace_tools
 from presentation import export_all
 from interface.web.schemas import (
@@ -93,6 +94,7 @@ from interface.web.routes import (
 
 log = logging.getLogger("jinni.web")
 WEB_SESSION_STORE = Path(__file__).resolve().parents[2] / "data" / "web_sessions.json"
+WEB_CHAT_WORKSPACES = Path(__file__).resolve().parents[2] / "data" / "chat_workspaces"
 FRONTEND_ORIGINS = (
     "http://localhost:1420",
     "http://127.0.0.1:1420",
@@ -132,10 +134,13 @@ class WebRuntime:
         # Keep the chat store beside the backend repository even when the app
         # launches the server with a different process working directory.
         self.session_store = WebSessionStore(WEB_SESSION_STORE)
+        self.chat_workspace_root = WEB_CHAT_WORKSPACES.resolve()
         self.session_load_failed = False
         self.agent = Agent(
             allowed_file=settings.allowed_file,
             project_active=False,
+            workspace_kind="chat",
+            inline_presentations=True,
             event_sink=self._agent_event,
             interaction_provider=self._request_interaction,
         )
@@ -166,6 +171,19 @@ class WebRuntime:
     def _load_sessions(self) -> None:
         snapshot = self.session_store.load()
         self.projects = snapshot.projects
+        # Migrate older isolated-copy registrations to the selected source path.
+        # Keep the old copy on disk so any unreviewed edits remain recoverable.
+        for project in self.projects.values():
+            source_path = project.get("source_path")
+            if not isinstance(source_path, str):
+                continue
+            source = Path(source_path).expanduser().resolve()
+            if not source.is_dir():
+                continue
+            project["legacy_copy_path"] = project.get("path", "")
+            project["path"] = str(source)
+            project["name"] = source.name or str(source)
+            project.pop("source_path", None)
         self.sessions = snapshot.sessions
         self.active_session_id = snapshot.active_session_id
         self.session_load_failed = snapshot.load_failed
@@ -320,11 +338,16 @@ class WebRuntime:
             permission = self.permission_states.get(self.active_session_id, {})
             expires_at = float(permission.get("full_access_expires_at", 0) or 0)
             if permission.get("mode") == "full-access" and expires_at <= time.monotonic():
-                self._set_permission_state("ask", tainted=bool(permission.get("tainted", False)))
+                self._set_permission_state(self._default_permission_mode(), tainted=bool(permission.get("tainted", False)))
                 permission = self.permission_states.get(self.active_session_id, {})
             return {
                 "busy": self.busy,
                 "project": str(self.project) if self.project else None,
+                "workspace_kind": "project" if self._active_project_id() else "chat",
+                "workspace_path": str(workspace_tools.WORKSPACE),
+                "project_managed": bool(self.project and is_managed_project(self.project)),
+                "project_auto_edit_supported": bool(self.project and self.project.is_dir()),
+                "latest_auto_edit_checkpoint": latest_auto_edit_checkpoint(self.project) if self.project else None,
                 "model": settings.model,
                 "thinking": "on" if self.agent.thinking_on else "off",
                 "reasoning_mode": self.reasoning_mode,
@@ -332,7 +355,7 @@ class WebRuntime:
                 "thinking_classifier_base_url": settings.thinking_classifier_base_url,
                 "latest_event_id": self.next_event_id - 1,
                 "active_session_id": self.active_session_id,
-                "permission_mode": permission.get("mode", "ask"),
+                "permission_mode": permission.get("mode", self._default_permission_mode()),
                 "session_tainted": bool(permission.get("tainted", False)),
                 "full_access_remaining": int(permission.get("remaining", 0) or 0),
                 "full_access_expires_in": max(0, int(expires_at - time.monotonic())) if permission.get("mode") == "full-access" else 0,
@@ -340,42 +363,58 @@ class WebRuntime:
                 "full_access_warning": FULL_ACCESS_WARNING,
             }
 
-    def set_permission_mode(self, mode: Literal["ask", "auto-edit", "full-access"], confirmation: str = "") -> dict[str, object]:
+    def set_permission_mode(self, mode: Literal["ask", "auto", "auto-edit", "full-access"], confirmation: str = "") -> dict[str, object]:
         with self.lock:
+            workspace_kind = "project" if self._active_project_id() else "chat"
             current = self.permission_states.get(self.active_session_id, {})
             tainted = bool(current.get("tainted", getattr(self.agent, "session_tainted", False)))
             if mode == "ask":
                 # Safe mode is intentionally available during a running turn.
-                self._set_permission_state("ask", tainted=tainted)
+                self._set_permission_state("auto" if workspace_kind == "chat" else "ask", tainted=tainted)
+            elif mode == "auto":
+                self._ensure_idle("change permission mode")
+                self._set_permission_state("auto", tainted=tainted)
+            elif mode == "auto-edit":
+                self._ensure_idle("change permission mode")
+                if workspace_kind != "project" or not self.agent.project_active:
+                    raise HTTPException(status_code=409, detail="Open a project before enabling Auto-edit.")
+                if tainted:
+                    raise HTTPException(status_code=409, detail="This chat is tainted. File changes still require approval.")
+                if not workspace_tools.WORKSPACE.is_dir():
+                    raise HTTPException(status_code=409, detail="The active project folder is unavailable.")
+                self._set_permission_state("auto-edit", tainted=tainted)
             else:
                 self._ensure_idle("change permission mode")
-                if not self._active_project_id() or not self.agent.project_active:
+                if workspace_kind != "project" or not self.agent.project_active:
                     raise HTTPException(status_code=409, detail="Open a project before enabling this permission mode.")
                 if tainted:
                     raise HTTPException(status_code=409, detail="This chat is tainted. Approval bypasses stay off until you start a fresh chat.")
-                if mode == "auto-edit":
-                    if not is_managed_project(workspace_tools.WORKSPACE):
-                        raise HTTPException(
-                            status_code=409,
-                            detail="Auto-edit requires a Jinni-managed project with reversible checkpoints.",
-                        )
-                    self._set_permission_state("auto-edit", tainted=tainted)
-                else:
-                    if not is_managed_project(workspace_tools.WORKSPACE):
-                        raise HTTPException(
-                            status_code=409,
-                            detail="Full Access requires a Jinni-managed project with reversible checkpoints.",
-                        )
-                    if not settings.allow_full_access:
-                        raise HTTPException(status_code=403, detail="Full Access is disabled in backend configuration.")
-                    if confirmation != "FULL ACCESS":
-                        raise HTTPException(status_code=400, detail="Type FULL ACCESS exactly to enable Full Access.")
-                    self._set_permission_state(
-                        "full-access", tainted=False,
-                        remaining=FULL_ACCESS_BUDGET,
-                        expires_at=time.monotonic() + FULL_ACCESS_SECONDS,
+                if not is_managed_project(workspace_tools.WORKSPACE):
+                    raise HTTPException(
+                        status_code=409,
+                        detail="Full Access requires a Jinni-managed project with reversible checkpoints.",
                     )
+                if not settings.allow_full_access:
+                    raise HTTPException(status_code=403, detail="Full Access is disabled in backend configuration.")
+                if confirmation != "FULL ACCESS":
+                    raise HTTPException(status_code=400, detail="Type FULL ACCESS exactly to enable Full Access.")
+                self._set_permission_state(
+                    "full-access", tainted=False,
+                    remaining=FULL_ACCESS_BUDGET,
+                    expires_at=time.monotonic() + FULL_ACCESS_SECONDS,
+                )
             return self.state()
+
+    def undo_auto_edit(self, checkpoint_id: str) -> dict[str, object]:
+        with self.lock:
+            self._ensure_idle("undo an Auto-edit")
+            if not self.project or not self.project.is_dir() or not self._active_project_id():
+                raise HTTPException(status_code=409, detail="Open the project that contains this change first.")
+            try:
+                result = restore_auto_edit_checkpoint(self.project, checkpoint_id)
+            except ValueError as error:
+                raise HTTPException(status_code=409, detail=str(error)) from None
+            return result
 
     def _set_permission_state(self, mode: str, *, tainted: bool, remaining: int = 0, expires_at: float = 0) -> None:
         state = {"mode": mode, "tainted": tainted, "remaining": remaining, "full_access_expires_at": expires_at}
@@ -391,9 +430,9 @@ class WebRuntime:
         if not self.active_session_id or self.active_session_id not in self.sessions:
             return
         state = self.permission_states.setdefault(self.active_session_id, {
-            "mode": "ask", "tainted": False, "remaining": 0, "full_access_expires_at": 0,
+            "mode": self._default_permission_mode(), "tainted": False, "remaining": 0, "full_access_expires_at": 0,
         })
-        state["mode"] = getattr(self.agent, "approval_mode", state.get("mode", "ask"))
+        state["mode"] = getattr(self.agent, "approval_mode", state.get("mode", self._default_permission_mode()))
         state["tainted"] = bool(getattr(self.agent, "session_tainted", state.get("tainted", False)))
         state["remaining"] = int(getattr(self.agent, "full_access_remaining", state.get("remaining", 0)) or 0)
         state["full_access_expires_at"] = float(getattr(self.agent, "full_access_expires_at", state.get("full_access_expires_at", 0)) or 0)
@@ -611,8 +650,8 @@ class WebRuntime:
         self._publish("project_changed", path=str(path))
         return path
 
-    def import_project(self, path_text: str) -> tuple[Path, Path]:
-        """Create or reuse an isolated, checkpointed working copy of a source folder."""
+    def import_project(self, path_text: str) -> Path:
+        """Open the exact project folder selected by the user."""
         source = Path(path_text).expanduser().resolve()
         if not source.is_dir():
             raise HTTPException(status_code=400, detail="Choose an existing folder on this computer.")
@@ -626,70 +665,31 @@ class WebRuntime:
             project_id = next(
                 (
                     key for key, item in self.projects.items()
-                    if isinstance(item.get("source_path"), str)
-                    and os.path.normcase(os.path.normpath(item["source_path"]))
-                    == os.path.normcase(os.path.normpath(str(source)))
+                    if any(
+                        isinstance(candidate, str)
+                        and os.path.normcase(os.path.normpath(candidate))
+                        == os.path.normcase(os.path.normpath(str(source)))
+                        for candidate in (item.get("path"), item.get("source_path"))
+                    )
                 ),
                 uuid4().hex,
             )
             existing = self.projects.get(project_id, {})
-            working = Path(existing["path"]) if existing and is_managed_project(existing["path"]) else None
-            if working is None:
-                source_key = hashlib.sha256(os.path.normcase(str(source)).encode("utf-8")).hexdigest()[:12]
-                safe_name = re.sub(r"[^A-Za-z0-9._-]+", "-", source.name).strip("._-")[:48] or "project"
-                working = workspace_tools.DEFAULT_WORKSPACE / "projects" / f"{safe_name}-{source_key}"
-                if working.exists():
-                    origin = working / ".jinni" / "origin.json"
-                    if (
-                        not is_managed_project(working)
-                        or origin.is_symlink()
-                        or not origin.is_file()
-                    ):
-                        raise HTTPException(
-                            status_code=409,
-                            detail="A folder already exists at the isolated project location and cannot be verified.",
-                        )
-                    try:
-                        recorded_source = json.loads(origin.read_text(encoding="utf-8")).get("source_path")
-                    except (OSError, UnicodeError, json.JSONDecodeError, AttributeError):
-                        recorded_source = None
-                    if (
-                        not isinstance(recorded_source, str)
-                        or os.path.normcase(os.path.normpath(recorded_source))
-                        != os.path.normcase(os.path.normpath(str(source)))
-                    ):
-                        raise HTTPException(
-                            status_code=409,
-                            detail="The isolated project location belongs to a different source folder.",
-                        )
-                else:
-                    try:
-                        working = copy_project(
-                            source,
-                            working.parent,
-                            project_name=working.name,
-                        )
-                        origin = working / ".jinni" / "origin.json"
-                        origin.write_text(
-                            json.dumps({"source_path": str(source)}), encoding="utf-8",
-                        )
-                    except (OSError, ValueError) as error:
-                        raise HTTPException(status_code=400, detail=str(error)) from error
-
-            try:
-                guidance = load_project_guidance(working)
-            except (OSError, ValueError) as error:
-                raise HTTPException(status_code=400, detail=str(error)) from error
-            self.projects[project_id] = {
+            project_record = {
                 "id": project_id,
-                "path": str(working),
-                "source_path": str(source),
+                "path": str(source),
                 "name": source.name or str(source),
             }
+            legacy_copy = existing.get("legacy_copy_path") or (
+                existing.get("path") if existing.get("path") != str(source) else None
+            )
+            if isinstance(legacy_copy, str) and legacy_copy:
+                project_record["legacy_copy_path"] = legacy_copy
+            self.projects[project_id] = project_record
             session_id = self._create_session(project_id)
             self._activate_session(session_id, guidance=guidance)
-        self._publish("project_changed", path=str(source))
-        return source, working
+        self._publish("project_changed", path=str(source), direct=True)
+        return source
 
     def close_project(self) -> None:
         with self.lock:
@@ -708,8 +708,10 @@ class WebRuntime:
         with self.lock:
             self._ensure_idle("clear the conversation")
             self._reset_session()
-            self._set_permission_state("ask", tainted=False)
-            self.sessions[self.active_session_id].user_display.clear()
+            self._set_permission_state(self._default_permission_mode(), tainted=False)
+            session = self.sessions[self.active_session_id]
+            session.user_display.clear()
+            session.working_window = {}
             self._save_active_session()
         self._publish("session_cleared")
 
@@ -791,6 +793,35 @@ class WebRuntime:
                 exported.update(session.user_display.get(index, {}))
                 messages.append(exported)
             return {"title": session.title, "messages": messages}
+
+    def chart_page(self, session_id: str, filename: str) -> HTMLResponse:
+        if not re.fullmatch(r"[A-Za-z0-9_-]{1,100}\.html", filename):
+            raise HTTPException(status_code=404, detail="Chart was not found.")
+        with self.lock:
+            session = self.sessions.get(session_id)
+            if session is None:
+                raise HTTPException(status_code=404, detail="Chat was not found.")
+            root = self._session_workspace_path(session)
+            folder = root / workspace_tools.CHART_DIR
+            path = folder / filename
+            if folder.is_symlink() or path.is_symlink() or not path.is_file():
+                raise HTTPException(status_code=404, detail="Chart was not found.")
+            if path.stat().st_size > 1_000_000:
+                raise HTTPException(status_code=413, detail="Chart is too large to display.")
+            try:
+                page = path.read_text(encoding="utf-8")
+            except (OSError, UnicodeError):
+                raise HTTPException(status_code=404, detail="Chart was not found.") from None
+            if not is_genuine_page(page):
+                raise HTTPException(status_code=415, detail="Only charts generated by Jinni can be embedded.")
+            return HTMLResponse(
+                page,
+                headers={
+                    "Cache-Control": "no-store",
+                    "X-Content-Type-Options": "nosniff",
+                    "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; img-src data:; font-src data:",
+                },
+            )
 
     def remove_project(self, project_id: str) -> dict[str, object]:
         with self.lock:
@@ -898,6 +929,33 @@ class WebRuntime:
         session = self.sessions.get(self.active_session_id)
         return session.project_id if session else None
 
+    def _default_permission_mode(self) -> str:
+        return "ask" if self._active_project_id() else "auto"
+
+    def _session_workspace_path(self, session: ChatSession) -> Path:
+        if session.project_id:
+            project = self.projects.get(session.project_id)
+            if project is None:
+                raise HTTPException(status_code=404, detail="Project was not found.")
+            path = Path(project["path"]).expanduser().resolve()
+            if not path.is_dir():
+                raise HTTPException(status_code=409, detail="The active project folder is unavailable.")
+            return path
+
+        # Hash persisted IDs so malformed legacy values cannot escape this directory.
+        import hashlib
+
+        root = self.chat_workspace_root
+        root.mkdir(parents=True, exist_ok=True)
+        path = root / hashlib.sha256(session.id.encode("utf-8")).hexdigest()
+        if path.is_symlink():
+            raise HTTPException(status_code=409, detail="The chat workspace cannot be a symbolic link.")
+        path.mkdir(parents=True, exist_ok=True)
+        path = path.resolve()
+        if not path.is_relative_to(root):
+            raise HTTPException(status_code=409, detail="The chat workspace is outside its storage folder.")
+        return path
+
     def _save_active_session(self) -> None:
         session = self.sessions.get(self.active_session_id)
         if session is None:
@@ -912,11 +970,9 @@ class WebRuntime:
         session = self.sessions.get(session_id)
         if session is None:
             raise HTTPException(status_code=404, detail="Chat was not found.")
-        path: Path | None = None
+        path = self._session_workspace_path(session)
         project_guidance = ""
         if session.project_id:
-            project = self.projects[session.project_id]
-            path = Path(project["path"])
             try:
                 project_guidance = guidance if guidance is not None else load_project_guidance(path)
             except (OSError, ValueError) as error:
@@ -925,28 +981,28 @@ class WebRuntime:
         self._save_active_session()
         self._sync_active_permission_state()
         self.active_session_id = session.id
-        permission = self.permission_states.get(session.id, {})
-        if path is not None:
-            workspace_tools.WORKSPACE = path
-            workspace_tools.PROJECT_ACTIVE = True
-            export_all.WORKSPACE = path
-            self.project = Path(project.get("source_path", str(path)))
-            self.agent.project_guidance = project_guidance
-            self.agent.set_project_active(True)
-        else:
-            workspace_tools.WORKSPACE = workspace_tools.DEFAULT_WORKSPACE.resolve()
-            workspace_tools.PROJECT_ACTIVE = False
-            export_all.WORKSPACE = workspace_tools.WORKSPACE
-            self.project = None
-            self.agent.project_guidance = ""
-            self.agent.set_project_active(False)
+        permission = self.permission_states.setdefault(session.id, {
+            "mode": "ask" if session.project_id else "auto",
+            "tainted": False, "remaining": 0, "full_access_expires_at": 0,
+        })
+        if not session.project_id:
+            permission["mode"] = "auto"
+            permission["remaining"] = 0
+            permission["full_access_expires_at"] = 0
+        workspace_tools.WORKSPACE = path
+        workspace_tools.PROJECT_ACTIVE = bool(session.project_id)
+        export_all.WORKSPACE = path
+        self.project = path if session.project_id else None
+        self.agent.project_guidance = project_guidance
+        self.agent.workspace_kind = "project" if session.project_id else "chat"
+        self.agent.set_project_active(True)
         self.agent.messages = [dict(message) for message in session.messages]
         self.agent.summary = session.summary
         self.agent.context_used = session.context_used
         if not self.agent.messages:
             self.agent.messages = [{"role": "system", "content": self.agent.system_prompt}]
         self.agent.apply_memory()
-        self.agent.approval_mode = permission.get("mode", "ask")
+        self.agent.approval_mode = str(permission.get("mode", self._default_permission_mode()))
         self.agent.session_tainted = bool(permission.get("tainted", False))
         self.agent.full_access_remaining = int(permission.get("remaining", 0) or 0)
         self.agent.full_access_expires_at = float(permission.get("full_access_expires_at", 0) or 0)

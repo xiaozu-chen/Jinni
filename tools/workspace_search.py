@@ -1,5 +1,5 @@
 from tools.registry import tool
-from tools.workspace import WORKSPACE
+from tools import workspace
 from runtime.workspace_search import format_results, search_workspace
 
 
@@ -11,5 +11,5 @@ from runtime.workspace_search import format_results, search_workspace
 )
 def search_workspace_files(query: str, limit: int = 5) -> str:
     """Return the most relevant project file excerpts for a question."""
-    results, mode = search_workspace(WORKSPACE, query, limit)
+    results, mode = search_workspace(workspace.WORKSPACE, query, limit)
     return format_results(results, mode)

@@ -32,7 +32,7 @@ class Settings:
 
     # agent
     system_prompt: str = "You are Jinni, a helpful local AI agent. Keep answers concise."
-    max_steps: int = 8
+    max_steps: int = 128
     thinking_default: bool = False
     thinking_classifier_model: str = "trained-classifier"
     thinking_classifier_base_url: str = "http://127.0.0.1:8082/v1"
@@ -113,8 +113,8 @@ class Settings:
     mcp_restart_max_delay: float = 30.0
 
     # Project execution (PowerShell remains opt-in; both tools require isolation)
-    powershell_enabled: bool = False
-    allow_full_access: bool = False
+    powershell_enabled: bool = True
+    allow_full_access: bool = True
 
     # PNG export (uses an installed Edge or Chrome, headless)
     browser_path: str = ""

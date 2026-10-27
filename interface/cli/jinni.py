@@ -51,7 +51,7 @@ def render_agent_event(event: AgentEvent) -> None:
         print(f"{GRAY}{event.text}{RESET}", end="", flush=True)
     elif event.kind == "thinking_end":
         print(f"{RESET}\n")
-    elif event.kind == "text_delta":
+    elif event.kind in {"text_delta", "responder_delta"}:
         print(event.text, end="", flush=True)
     elif event.kind == "text_end":
         print()
@@ -99,10 +99,10 @@ def help_text() -> str:
   /help              show this list
   /config            show effective settings (sensitive values are hidden)
   /undo              remove the latest chat turn from conversation history
-  /mode ask|auto-edit choose approval behavior for this session
+  /mode ask|auto|auto-edit choose approval behavior for this session
   /full-access       request bounded Full Access (if enabled)
   /safe              return to Ask mode immediately
-  /project [NAME]    list or switch projects; /project create NAME makes one
+  /project [NAME|PATH] list or switch projects; /project create NAME makes one
   /subtask TASK      summarize prior work and start with a fresh context
   /think [on|off|auto] toggle reasoning, or return to automatic classification
   /parallel          toggle parallel tool calls
@@ -167,7 +167,13 @@ def undo_last_turn(agent: Agent) -> str:
     restored = False
     if getattr(agent, "write_checkpoint", None):
         try:
-            restored = project_tools.undo_last_checkpoint(workspace_tools.WORKSPACE)
+            checkpoint = str(agent.write_checkpoint)
+            if re.fullmatch(r"[0-9a-f]{32}", checkpoint):
+                restored = bool(project_tools.restore_auto_edit_checkpoint(
+                    workspace_tools.WORKSPACE, checkpoint
+                ).get("restored"))
+            else:
+                restored = project_tools.undo_last_checkpoint(workspace_tools.WORKSPACE)
         except (OSError, ValueError) as error:
             return f"(could not undo the chat turn: {error})"
         agent.write_checkpoint = None
@@ -212,7 +218,7 @@ def mcp_restart_target(argument: str) -> str | None:
 
 
 def activate_project(path, agent: Agent) -> str:
-    """Switch workspace-scoped tools and guidance together to one managed project."""
+    """Switch workspace-scoped tools and guidance to the selected project folder."""
     if agent.approval_mode != "ask":
         agent.safe_mode("the active project changed")
     path = Path(path).expanduser().resolve()
@@ -229,18 +235,15 @@ def activate_project(path, agent: Agent) -> str:
 def main(argv: list[str] | None = None) -> None:
     """Load runtime services, route slash commands, and run the interactive chat loop."""
     parser = argparse.ArgumentParser(description="Jinni local AI agent")
-    parser.add_argument("--project", help="copy this project into the Jinni workspace before editing")
+    parser.add_argument("--project", help="work directly in this project folder")
     args = parser.parse_args(argv)
 
     active_workspace = workspace_tools.WORKSPACE
     projects_dir = active_workspace / "projects"
     if args.project:
-        try:
-            active_workspace = project_tools.copy_project(
-                args.project, projects_dir
-            )
-        except (OSError, ValueError) as error:
-            parser.error(str(error))
+        active_workspace = Path(args.project).expanduser().resolve()
+        if not active_workspace.is_dir():
+            parser.error("--project must point to an existing folder")
     workspace_tools.WORKSPACE = active_workspace
     export_all.WORKSPACE = active_workspace
     try:
@@ -263,7 +266,7 @@ def main(argv: list[str] | None = None) -> None:
         log.warning("plugin skipped: %s", err)
         print(f"  (plugin skipped: {err})")
 
-    project_active = (active_workspace / ".jinni" / "managed-project").is_file()
+    project_active = bool(args.project) or (active_workspace / ".jinni" / "managed-project").is_file()
     workspace_tools.PROJECT_ACTIVE = project_active
     agent = Agent(project_guidance=project_guidance, allowed_file=settings.allowed_file,
                   project_active=project_active, event_sink=render_agent_event)
@@ -324,17 +327,20 @@ def main(argv: list[str] | None = None) -> None:
                     if requested == "ask":
                         agent.safe_mode()
                         print("  (approval mode: Ask)")
+                    elif requested == "auto":
+                        agent.approval_mode = "auto"
+                        print("  (Auto mode: web search and public page reads are approved automatically)")
                     elif requested == "auto-edit":
                         try:
                             agent.enable_auto_edit()
                         except ValueError as error:
                             print(f"  ({error})")
                         else:
-                            print("  (Auto-edit enabled for this CLI session and active project)")
+                            print("  (Auto-edit enabled for this project session; writes use checkpoints)")
                     elif requested == "full-access":
                         print("  (use /full-access to review its warning and type the confirmation)")
                     else:
-                        print("  (usage: /mode ask|auto-edit)")
+                        print("  (usage: /mode ask|auto|auto-edit)")
                     continue
                 if cmd == "/full-access":
                     if not settings.allow_full_access:
@@ -387,7 +393,11 @@ def main(argv: list[str] | None = None) -> None:
                                 name = project_arg.split(maxsplit=1)[1]
                                 path = project_tools.create_project(name, projects_dir)
                             else:
-                                path = project_tools.select_project(project_arg, projects_dir)
+                                candidate = Path(project_arg).expanduser()
+                                path = (
+                                    candidate.resolve() if candidate.is_dir()
+                                    else project_tools.select_project(project_arg, projects_dir)
+                                )
                             print(f"  {activate_project(path, agent)}")
                         except (OSError, ValueError) as error:
                             print(f"  (project switch failed: {error})")

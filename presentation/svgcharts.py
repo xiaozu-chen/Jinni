@@ -16,6 +16,8 @@ SVG_TAGS = {"svg", "title", "line", "text", "rect", "circle", "polyline", "path"
 SVG_ATTRS = {"viewBox", "role", "aria-label", "class", "x", "y", "x1", "y1", "x2", "y2",
              "width", "height", "rx", "cx", "cy", "r", "d", "points", "transform", "text-anchor"}
 MAX_SVG_CHARS = 500_000
+HEAT_COLORS = ("#eff6ff", "#dbeafe", "#bfdbfe", "#93c5fd", "#60a5fa", "#3b82f6", "#1d4ed8", "#1e3a8a")
+HEATMAP_CSS = " ".join(f".h{i} {{ fill: {color}; }}" for i, color in enumerate(HEAT_COLORS))
 
 _H1 = re.compile(r"<h1>(.*?)</h1>", re.S)
 _SUB = re.compile(r'<p class="sub">(.*?)</p>', re.S)
@@ -46,6 +48,7 @@ SVG_EXPORT_CSS = """\
 .s7.line { stroke-dasharray: 5 1; }
 .legend { fill: var(--fg); font-size: 12px; }
 .legend-value { fill: var(--muted); font-size: 12px; }
+""" + HEATMAP_CSS + """
 """
 
 EXPORT_CSS = """/* export layout */
@@ -90,6 +93,7 @@ PAGE = """<!doctype html>
   .s7.line { stroke-dasharray: 5 1; }
   .legend { fill: var(--fg); font-size: 12px; }
   .legend-value { fill: var(--muted); font-size: 12px; }
+  """ + HEATMAP_CSS + """
 $extra</style>
 </head>
 <body>
@@ -322,6 +326,130 @@ def stacked_bar_chart(labels: Sequence[str], values: Mapping[str, Sequence[float
     return _xy_svg("bar", labels, values, title, x_title, y_title, stacked=True)
 
 
+def scatter_chart(
+    xs: Sequence[float], ys: Sequence[float], title: str,
+    x_title: str, y_title: str, point_labels: Sequence[str],
+    sizes: Sequence[float] | None = None,
+    size_title: str = "",
+) -> str:
+    """Render bounded numeric points, optionally scaling bubble area by a third variable."""
+    if (not xs or len(xs) != len(ys) or len(xs) != len(point_labels)
+            or sizes is not None and len(sizes) != len(xs)
+            or any(not math.isfinite(float(value)) for value in [*xs, *ys])
+            or sizes is not None and any(not math.isfinite(float(value)) or value < 0 for value in sizes)):
+        raise ValueError("scatter data must contain matching finite numeric values")
+    width, height = 800, 460
+    left, right, top, bottom = 82, 24, 24, 76
+    plot_w, plot_h = width - left - right, height - top - bottom
+    x_ticks, y_ticks = nice_ticks(min(xs), max(xs)), nice_ticks(min(ys), max(ys))
+    x_low, x_high, y_low, y_high = x_ticks[0], x_ticks[-1], y_ticks[0], y_ticks[-1]
+
+    def x_pos(value: float) -> float:
+        return left + (value - x_low) / (x_high - x_low) * plot_w
+
+    def y_pos(value: float) -> float:
+        return top + plot_h - (value - y_low) / (y_high - y_low) * plot_h
+
+    sizes_list = list(sizes) if sizes is not None else []
+    size_low = min(sizes_list, default=0)
+    size_high = max(sizes_list, default=0)
+    parts = [
+        f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {width} {height}" role="img" aria-label="{escape(title)}">',
+        f"<title>{escape(title)}</title>",
+    ]
+    for tick in x_ticks:
+        x = x_pos(tick)
+        parts.append(f'<line class="grid" x1="{x:.1f}" y1="{top}" x2="{x:.1f}" y2="{top + plot_h}"/>')
+        parts.append(f'<text class="tick" x="{x:.1f}" y="{top + plot_h + 18}" text-anchor="middle">{compact(tick)}</text>')
+    for tick in y_ticks:
+        y = y_pos(tick)
+        parts.append(f'<line class="grid" x1="{left}" y1="{y:.1f}" x2="{left + plot_w}" y2="{y:.1f}"/>')
+        parts.append(f'<text class="tick" x="{left - 8}" y="{y + 4:.1f}" text-anchor="end">{compact(tick)}</text>')
+    parts.extend((
+        f'<line class="axis" x1="{left}" y1="{top}" x2="{left}" y2="{top + plot_h}"/>',
+        f'<line class="axis" x1="{left}" y1="{top + plot_h}" x2="{left + plot_w}" y2="{top + plot_h}"/>',
+    ))
+    for index, (x, y, label) in enumerate(zip(xs, ys, point_labels)):
+        if sizes is None:
+            radius = 5.0
+        elif size_high == size_low:
+            radius = 10.0
+        else:
+            radius = 3.5 + 14 * math.sqrt((sizes[index] - size_low) / (size_high - size_low))
+        tooltip = f"{label} · {x_title}: {compact(x)} · {y_title}: {compact(y)}"
+        if sizes is not None:
+            tooltip += f" · {size_title or 'size'}: {sizes[index]:g}"
+        parts.append(
+            f'<circle class="dot s0" cx="{x_pos(x):.1f}" cy="{y_pos(y):.1f}" r="{radius:.1f}">'
+            f"<title>{escape(tooltip)}</title></circle>"
+        )
+    mid = top + plot_h / 2
+    if sizes is not None:
+        parts.append(f'<text class="tick" x="{left + plot_w / 2:.1f}" y="{height - 32}" text-anchor="middle">Bubble area: {escape(_short(size_title or "size", 48))}</text>')
+    parts.append(f'<text class="axis-title" x="{left + plot_w / 2:.1f}" y="{height - 10}" text-anchor="middle">{escape(_short(x_title, 48))}</text>')
+    parts.append(f'<text class="axis-title" x="14" y="{mid:.1f}" text-anchor="middle" transform="rotate(-90 14 {mid:.1f})">{escape(_short(y_title, 40))}</text>')
+    parts.append("</svg>")
+    return "\n".join(parts)
+
+
+def heatmap_chart(
+    row_labels: Sequence[str], column_labels: Sequence[str],
+    values: Sequence[Sequence[float | None]], title: str,
+    x_title: str, y_title: str,
+) -> str:
+    """Render a categorical matrix as a sequential-color heatmap with per-cell tooltips."""
+    if (not row_labels or not column_labels or len(values) != len(row_labels)
+            or any(len(row) != len(column_labels) for row in values)):
+        raise ValueError("heatmap labels and matrix dimensions do not match")
+    finite = [float(value) for row in values for value in row if value is not None]
+    if not finite or any(not math.isfinite(value) for value in finite):
+        raise ValueError("heatmap needs at least one finite numeric cell")
+    width, height = 900, 580
+    left, right, top, bottom = 126, 24, 34, 160
+    plot_w, plot_h = width - left - right, height - top - bottom
+    cell_w, cell_h = plot_w / len(column_labels), plot_h / len(row_labels)
+    low, high = min(finite), max(finite)
+    parts = [
+        f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {width} {height}" role="img" aria-label="{escape(title)}">',
+        f"<title>{escape(title)}</title>",
+    ]
+    for row_index, (row_label, row) in enumerate(zip(row_labels, values)):
+        y = top + row_index * cell_h
+        parts.append(f'<text class="tick" x="{left - 8}" y="{y + cell_h / 2 + 4:.1f}" text-anchor="end">{escape(_short(str(row_label), 18))}</text>')
+        for column_index, value in enumerate(row):
+            if value is None:
+                continue
+            ratio = 0.5 if high == low else (float(value) - low) / (high - low)
+            color_index = min(len(HEAT_COLORS) - 1, int(ratio * len(HEAT_COLORS)))
+            x = left + column_index * cell_w
+            parts.append(
+                f'<rect class="h{color_index}" x="{x + 1:.1f}" y="{y + 1:.1f}" '
+                f'width="{max(0.5, cell_w - 2):.1f}" height="{max(0.5, cell_h - 2):.1f}">'
+                f'<title>{escape(str(row_label))} · {escape(str(column_labels[column_index]))}: {compact(float(value))}</title></rect>'
+            )
+    label_stride = max(1, math.ceil(len(column_labels) / 18))
+    for column_index, label in enumerate(column_labels):
+        if column_index % label_stride and column_index != len(column_labels) - 1:
+            continue
+        x = left + (column_index + 0.5) * cell_w
+        y = top + plot_h + 12
+        parts.append(
+            f'<text class="tick" x="{x:.1f}" y="{y:.1f}" text-anchor="end" '
+            f'transform="rotate(-40 {x:.1f} {y:.1f})">{escape(_short(str(label), 18))}</text>'
+        )
+    legend_y = height - 68
+    legend_x = left
+    legend_w = min(plot_w, 360)
+    swatch_w = legend_w / len(HEAT_COLORS)
+    for index in range(len(HEAT_COLORS)):
+        parts.append(f'<rect class="h{index}" x="{legend_x + index * swatch_w:.1f}" y="{legend_y}" width="{swatch_w + 0.5:.1f}" height="10"/>')
+    parts.append(f'<text class="tick" x="{legend_x}" y="{legend_y + 24}">{compact(low)}</text>')
+    parts.append(f'<text class="tick" x="{legend_x + legend_w}" y="{legend_y + 24}" text-anchor="end">{compact(high)}</text>')
+    parts.append(f'<text class="axis-title" x="{left + plot_w / 2:.1f}" y="{height - 4}" text-anchor="middle">Columns: {escape(_short(x_title, 48))} · Rows: {escape(_short(y_title, 36))}</text>')
+    parts.append("</svg>")
+    return "\n".join(parts)
+
+
 def pie_chart(labels: Sequence[str], values: Sequence[float], title: str,
               donut: bool = False) -> str:
     if not values or len(labels) != len(values):
@@ -421,9 +549,20 @@ def parse_page(page: str) -> tuple[str, str, str] | None:
 
 
 def is_genuine_page(page: str) -> bool:
-    """True if the page is exactly what our generator produces from its own parts."""
+    """True for current or legacy generated pages, with exact template and SVG validation."""
     parts = parse_page(page)
-    return parts is not None and html_page(*parts) == page
+    if parts is None:
+        return False
+    if html_page(*parts) == page:
+        return True
+    # A prior release generated the same constrained pages before heatmap styles
+    # were added. Keep those already-saved charts viewable after a backend update.
+    legacy_template = PAGE.replace(f"  {HEATMAP_CSS}\n", "")
+    legacy_page = Template(legacy_template).substitute(
+        title=escape(parts[0]), subtitle=escape(parts[1]), svg=parts[2],
+        light_vars=LIGHT_VARS, dark_vars=DARK_VARS, extra="",
+    )
+    return legacy_page == page
 
 
 def export_page(page: str, theme: str = "light") -> str:

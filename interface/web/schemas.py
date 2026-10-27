@@ -54,8 +54,12 @@ class ReasoningModeRequest(BaseModel):
 
 
 class PermissionModeRequest(BaseModel):
-    mode: Literal["ask", "auto-edit", "full-access"]
+    mode: Literal["ask", "auto", "auto-edit", "full-access"]
     confirmation: str = ""
+
+
+class AutoEditUndoRequest(BaseModel):
+    checkpoint_id: str = Field(pattern=r"^[0-9a-f]{32}$")
 
 
 class McpServerCreateRequest(BaseModel):

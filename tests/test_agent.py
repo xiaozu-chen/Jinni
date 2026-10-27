@@ -248,7 +248,7 @@ def test_responder_uses_agent_context_and_streams_user_facing_text(monkeypatch):
     assert requests[0]["messages"][3]["role"] == "tool"
     assert "tools" not in requests[0]
     assert [event.kind for event in events] == [
-        "responder_start", "responder_delta", "status", "text_end",
+        "responder_start", "text_delta", "status", "text_end",
     ]
 
 

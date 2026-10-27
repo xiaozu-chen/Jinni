@@ -17,16 +17,36 @@ SCOPES: dict[str, ScopeFn] = {}
 JSON_TYPES = {str: "string", int: "integer", float: "number", bool: "boolean"}
 
 
-def tool_names(project_active: bool | None = None) -> set[str]:
-    return {
+CHAT_WORKSPACE_TOOLS = frozenset({
+    "list_files", "read_file", "search_files", "find_files", "write_file",
+    "edit_file", "apply_patch", "delete_file", "make_chart", "fetch_table",
+    "search_snippets_for_chart", "search_workspace_files",
+})
+
+
+def tool_names(project_active: bool | None = None, workspace_kind: str = "project") -> set[str]:
+    visible = {
         name for name in TOOL_FUNCTIONS
         if name != "delete_file"
         if project_active is not False or TOOL_GROUPS.get(name, "core") != "project"
     }
+    if workspace_kind == "chat":
+        visible = {
+            name for name in visible
+            if TOOL_GROUPS.get(name, "core") != "project" or name in CHAT_WORKSPACE_TOOLS
+        }
+        visible |= CHAT_WORKSPACE_TOOLS & TOOL_FUNCTIONS.keys()
+        # Chat workspaces are for research and artifacts, not executing project commands.
+        visible -= {"run_tests", "run_powershell"}
+    return visible
 
 
-def tool_schemas(project_active: bool | None = None, names: set[str] | None = None) -> list[dict[str, Any]]:
-    visible = tool_names(project_active)
+def tool_schemas(
+    project_active: bool | None = None,
+    names: set[str] | None = None,
+    workspace_kind: str = "project",
+) -> list[dict[str, Any]]:
+    visible = tool_names(project_active, workspace_kind)
     if names is not None:
         visible &= names
     return [schema for schema in TOOL_SCHEMAS if schema["function"]["name"] in visible]

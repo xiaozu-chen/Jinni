@@ -1,6 +1,8 @@
-"""Create managed project copies and preserve reversible Git checkpoints before writes."""
+"""Manage project checkpoints and legacy isolated-project utilities."""
 
 import difflib
+import base64
+import binascii
 import hashlib
 import json
 import os
@@ -9,7 +11,9 @@ import shutil
 import stat
 import subprocess
 import tempfile
+from datetime import datetime, timezone
 from pathlib import Path
+from uuid import uuid4
 
 SKIP_COPY_DIRS = {
     ".git", ".jinni", ".pytest_cache", ".trash", ".venv", "__pycache__", "node_modules",
@@ -20,6 +24,8 @@ MAX_REVIEW_FILES = 500
 MAX_REVIEW_FILE_BYTES = 1_000_000
 MAX_REVIEW_DIFF_CHARS = 200_000
 MAX_APPLY_TOTAL_BYTES = 100_000_000
+MAX_AUTO_EDIT_CHECKPOINTS = 20
+MAX_AUTO_EDIT_FILE_BYTES = 2_000_000
 PROJECT_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 CHECKPOINTED_WRITES = {
     "write_file", "edit_file", "apply_patch", "delete_file", "make_chart", "fetch_table",
@@ -134,6 +140,158 @@ def checkpoint_before_write(tool_name: str, project_path: str | Path) -> str | N
         return commit
     except (OSError, subprocess.CalledProcessError):
         raise ValueError("could not save a Git checkpoint; the approved write was not run") from None
+
+
+def _checkpoint_root(project_path: str | Path, *, create: bool = True) -> Path:
+    root = Path(project_path).expanduser().resolve()
+    if not root.is_dir():
+        raise ValueError("the active project folder is unavailable")
+    storage = Path(__file__).resolve().parents[1] / "data" / "auto_edit_checkpoints"
+    project_key = hashlib.sha256(os.path.normcase(str(root)).encode("utf-8")).hexdigest()
+    folder = storage / project_key
+    if create:
+        storage.mkdir(parents=True, exist_ok=True)
+        folder.mkdir(exist_ok=True)
+    return folder
+
+
+def _checkpoint_target(root: Path, relative_name: str) -> Path:
+    relative = Path(relative_name)
+    if (not relative_name or relative.is_absolute() or relative.drive or ".." in relative.parts
+            or any(part.casefold() in {".git", ".jinni"} for part in relative.parts)):
+        raise ValueError("Auto-edit can checkpoint only a file inside the active project")
+    target = root / relative
+    for index in range(1, len(relative.parts) + 1):
+        if (root / Path(*relative.parts[:index])).is_symlink():
+            raise ValueError("Auto-edit cannot checkpoint a path that follows a symbolic link")
+    if not target.resolve().is_relative_to(root):
+        raise ValueError("Auto-edit cannot checkpoint a path outside the active project")
+    return target
+
+
+def _checkpoint_file_state(target: Path, *, include_content: bool = True) -> dict[str, object]:
+    if not target.exists():
+        return {"exists": False, "sha256": None}
+    if target.is_symlink() or not target.is_file():
+        raise ValueError("Auto-edit checkpoints support regular files only")
+    if target.stat().st_size > MAX_AUTO_EDIT_FILE_BYTES:
+        raise ValueError("Auto-edit checkpoint files are limited to 2 MB")
+    data = target.read_bytes()
+    state: dict[str, object] = {
+        "exists": True,
+        "sha256": hashlib.sha256(data).hexdigest(),
+        "mode": stat.S_IMODE(target.stat().st_mode),
+    }
+    if include_content:
+        state["content"] = base64.b64encode(data).decode("ascii")
+    return state
+
+
+def begin_auto_edit_checkpoint(tool_name: str, project_path: str | Path, args: dict[str, object]) -> str:
+    """Persist a backend-only before-image for one supported direct-folder file write."""
+    if tool_name not in {"write_file", "edit_file", "apply_patch"}:
+        raise ValueError("Auto-edit is limited to checkpointed file changes")
+    root = Path(project_path).expanduser().resolve()
+    name = args.get("path")
+    if not isinstance(name, str):
+        raise ValueError("the file path for this change is invalid")
+    target = _checkpoint_target(root, name)
+    before = _checkpoint_file_state(target)
+    checkpoint_id = uuid4().hex
+    folder = _checkpoint_root(root)
+    record = {
+        "id": checkpoint_id,
+        "tool": tool_name,
+        "path": target.relative_to(root).as_posix(),
+        "before": before,
+        "after": None,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    (folder / f"{checkpoint_id}.json").write_text(json.dumps(record), encoding="utf-8")
+    index_path = folder / "index.json"
+    try:
+        ids = json.loads(index_path.read_text(encoding="utf-8")) if index_path.is_file() else []
+    except (OSError, json.JSONDecodeError):
+        ids = []
+    ids = [item for item in ids if isinstance(item, str) and item != checkpoint_id]
+    ids.append(checkpoint_id)
+    for old_id in ids[:-MAX_AUTO_EDIT_CHECKPOINTS]:
+        if re.fullmatch(r"[0-9a-f]{32}", old_id):
+            (folder / f"{old_id}.json").unlink(missing_ok=True)
+    temporary = index_path.with_suffix(".tmp")
+    temporary.write_text(json.dumps(ids[-MAX_AUTO_EDIT_CHECKPOINTS:]), encoding="utf-8")
+    os.replace(temporary, index_path)
+    return checkpoint_id
+
+
+def finish_auto_edit_checkpoint(checkpoint_id: str, project_path: str | Path) -> None:
+    root = Path(project_path).expanduser().resolve()
+    folder = _checkpoint_root(root)
+    if not re.fullmatch(r"[0-9a-f]{32}", checkpoint_id):
+        raise ValueError("the Auto-edit checkpoint is invalid")
+    record_path = folder / f"{checkpoint_id}.json"
+    record = json.loads(record_path.read_text(encoding="utf-8"))
+    target = _checkpoint_target(root, str(record.get("path", "")))
+    record["after"] = _checkpoint_file_state(target, include_content=False)
+    temporary = record_path.with_suffix(".tmp")
+    temporary.write_text(json.dumps(record), encoding="utf-8")
+    os.replace(temporary, record_path)
+
+
+def latest_auto_edit_checkpoint(project_path: str | Path) -> dict[str, object] | None:
+    try:
+        root = Path(project_path).expanduser().resolve()
+        folder = _checkpoint_root(root, create=False)
+    except (OSError, ValueError):
+        return None
+    index_path = folder / "index.json"
+    if not index_path.is_file():
+        return None
+    try:
+        ids = json.loads(index_path.read_text(encoding="utf-8"))
+        for checkpoint_id in reversed(ids if isinstance(ids, list) else []):
+            if not isinstance(checkpoint_id, str) or not re.fullmatch(r"[0-9a-f]{32}", checkpoint_id):
+                continue
+            record_path = folder / f"{checkpoint_id}.json"
+            record = json.loads(record_path.read_text(encoding="utf-8"))
+            if record.get("after") is None:
+                continue
+            return {"id": checkpoint_id, "path": record.get("path"), "tool": record.get("tool")}
+    except (OSError, ValueError, json.JSONDecodeError):
+        return None
+    return None
+
+
+def restore_auto_edit_checkpoint(project_path: str | Path, checkpoint_id: str) -> dict[str, object]:
+    """Restore one file only when it still matches the state Jinni wrote."""
+    root = Path(project_path).expanduser().resolve()
+    folder = _checkpoint_root(root)
+    if not re.fullmatch(r"[0-9a-f]{32}", checkpoint_id):
+        raise ValueError("the Auto-edit checkpoint is invalid")
+    record_path = folder / f"{checkpoint_id}.json"
+    try:
+        record = json.loads(record_path.read_text(encoding="utf-8"))
+        target = _checkpoint_target(root, str(record.get("path", "")))
+        before, after = record.get("before"), record.get("after")
+        if not isinstance(before, dict) or not isinstance(after, dict):
+            raise ValueError
+        current = _checkpoint_file_state(target, include_content=False)
+        if any(current.get(key) != after.get(key) for key in ("exists", "sha256", "mode")):
+            raise ValueError("the file changed after Jinni edited it; restore was cancelled to protect newer work")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        if before.get("exists"):
+            content = base64.b64decode(str(before.get("content", "")), validate=True)
+            if hashlib.sha256(content).hexdigest() != before.get("sha256"):
+                raise ValueError
+            _write_atomic(target, content, int(before.get("mode", 0o644)))
+        elif target.exists():
+            target.unlink()
+        record_path.unlink(missing_ok=True)
+        return {"restored": True, "path": record.get("path")}
+    except ValueError:
+        raise
+    except (OSError, KeyError, TypeError, binascii.Error, json.JSONDecodeError):
+        raise ValueError("could not restore the Auto-edit checkpoint") from None
 
 
 def undo_last_checkpoint(project_path: str | Path) -> bool:

@@ -62,6 +62,8 @@ class WebSessionStore:
                     record = {key: project[key] for key in ("id", "path", "name")}
                     if isinstance(project.get("source_path"), str):
                         record["source_path"] = project["source_path"]
+                    if isinstance(project.get("legacy_copy_path"), str):
+                        record["legacy_copy_path"] = project["legacy_copy_path"]
                     projects[project["id"]] = record
             for row in data.get("sessions", []):
                 if not isinstance(row, dict) or not isinstance(row.get("id"), str):

@@ -25,9 +25,13 @@ Run `python -m bench.eval_harness` against the configured local chat server to m
 
 ## Charts and data
 
-`make_chart` reads CSV files and `.xlsx` workbooks from the workspace. Excel input uses the first worksheet; legacy `.xls` files are not supported. Tables can contain up to 50 data rows.
+`make_chart` reads CSV files and `.xlsx` workbooks from the workspace. Excel input uses the first worksheet; legacy `.xls` files are not supported. Most chart kinds accept up to 50 data rows. Heatmaps accept up to 1,000 long-form cells, with a maximum 24 row categories by 36 column categories.
 
-Supported chart kinds are `bar`, `stacked`, `line`, `pie`, and `donut`. Use `secondary_y_column` with a line chart when a series needs its own scale. Narrow single-series bars use compact value labels. The chart palette is based on the [Okabe–Ito Color Universal Design palette](https://jfly.uni-koeln.de/color/), with different dash patterns for line series so color is not the only cue.
+Supported chart kinds are `bar`, `stacked`, `line`, `pie`, `donut`, `scatter`, `bubble`, and `heatmap`. Use `scatter` for two numeric variables and `bubble` to encode a third numeric variable as bubble area (`size_column`). Use `heatmap` for a long-form table with one row per `row_column` / `x_column` / numeric `y_column` cell; repeated cells are rejected, while missing combinations render as blank. Use `secondary_y_column` with a line chart when a series needs its own scale. Narrow single-series bars use compact value labels. The chart palette is based on the [Okabe–Ito Color Universal Design palette](https://jfly.uni-koeln.de/color/), with different dash patterns for line series so color is not the only cue.
+
+Charts are static, self-contained SVG pages rendered inline in a sandboxed iframe; hover tooltips are available for scatter points and heatmap cells. Sankey diagrams, treemaps, geographic maps, function plots, interactive simulations, and financial calculators are not supported yet. Those interactive features need a separate constrained rendering and interaction model; they should not be embedded as arbitrary executable chart HTML.
+
+In the web app, generated charts can appear inline in Jinni's response inside a sandboxed iframe. Chat workspaces are isolated per session under backend `data/chat_workspaces/`; Project chats instead operate directly in the selected project folder and use the separate project permission modes.
 
 Chart export commands save files beside the HTML chart:
 
@@ -36,7 +40,9 @@ Chart export commands save files beside the HTML chart:
 - `/pdf [chart]`
 - `/export-all [png|svg|pdf]` (omit the format to export every chart to all three formats)
 
-`fetch_table(url, table_index)` saves a public HTML table as a CSV and records the source URL, fetch time, and content hash in a provenance sidecar. Charts made from that CSV retain the source and date.
+`fetch_table(url, table_index, row_limit, sort_by, descending)` saves a public HTML table, CSV resource, or JSON record set as a CSV and records the source URL, fetch time, and content hash in a provenance sidecar. For JSON APIs with common `page/pages` metadata it follows pagination within bounded limits, sorts all fetched rows if requested, then retains up to 50 for the chart. Charts made from that CSV retain the source and date.
+
+For data-driven charts, Jinni should search once for a relevant primary source, then use `fetch_table` to save an HTML table, CSV, or JSON record set as a provenance-tracked CSV. It can sort by a named column and retain up to 50 chart rows before creating a chart. The download asks for approval; the result includes the columns and a short preview so Jinni can pick the right series and explain any row limit. The chart tool supports at most 50 x-axis values and six data series.
 
 CSV files created or edited with Jinni also get a hash-checked sidecar, so charts keep the "typed by Jinni, numbers unverified" notice after a restart.
 
@@ -78,7 +84,7 @@ The read-only coding tools include ranged `read_file`, `search_files`, `find_fil
 
 Use `check_python(path, checker)` for a bounded syntax check, Ruff lint, or Pyright type check. Ruff and Pyright are optional local tools; checks time out, cap their output, and never apply fixes.
 
-Launch `jinni --project PATH` to copy a repository into `workspace/projects/` before Jinni can edit it. Jinni loads that copy's `JINNI.md` as project guidance; generated folders such as virtual environments and caches are skipped. Without `--project`, the regular workspace remains active.
+Launch `jinni --project PATH` to work directly in the selected project folder. Jinni loads that folder's `JINNI.md` as project guidance. Permission mode defaults to Auto: web search and public page reads run without prompts, including after those results taint the chat. Downloaded tables/snippet data, project changes, commands, and MCP actions still require approval; Auto-edit is a separate opt-in for checkpointed project file writes. Full Access still requires a Jinni-managed project and its separate backend opt-in. Without `--project`, the regular workspace remains active.
 
 ## Read-only MCP server
 

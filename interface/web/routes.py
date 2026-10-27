@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from interface.web.schemas import (
     ChatRequest,
+    AutoEditUndoRequest,
     InteractionRequest,
     McpServerCreateRequest,
     McpToolsRequest,
@@ -94,6 +95,15 @@ def export_session(
     runtime: Annotated[Any, Depends(get_runtime)],
 ) -> dict[str, object]:
     return runtime.export_session(session_id)
+
+
+@router.get("/api/sessions/{session_id}/charts/{filename}")
+def get_session_chart(
+    session_id: str,
+    filename: str,
+    runtime: Annotated[Any, Depends(get_runtime)],
+):
+    return runtime.chart_page(session_id, filename)
 
 
 @router.post("/api/sessions/{session_id}/edit")
@@ -226,6 +236,14 @@ def set_permission_mode(
     return runtime.set_permission_mode(body.mode, body.confirmation)
 
 
+@router.post("/api/auto-edit/undo")
+def undo_auto_edit(
+    body: AutoEditUndoRequest,
+    runtime: Annotated[Any, Depends(get_runtime)],
+) -> dict[str, object]:
+    return runtime.undo_auto_edit(body.checkpoint_id)
+
+
 @router.post("/api/project/select")
 def select_project(
     body: ProjectRequest, runtime: Annotated[Any, Depends(get_runtime)],
@@ -238,8 +256,8 @@ def select_project(
 def import_project(
     body: ProjectRequest, runtime: Annotated[Any, Depends(get_runtime)],
 ) -> dict[str, str]:
-    source, working_copy = runtime.import_project(body.path)
-    return {"project": str(source), "working_copy": str(working_copy)}
+    path = runtime.import_project(body.path)
+    return {"project": str(path)}
 
 
 @router.post("/api/project/close")

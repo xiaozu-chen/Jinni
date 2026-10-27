@@ -1,6 +1,7 @@
 venv
 __pycache__
 workspace
+data/chat_workspaces/
 memory.txt
 .vscode
 jinni.log
