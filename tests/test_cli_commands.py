@@ -8,7 +8,7 @@ import pytest
 from settings.config import McpServerConfig, load_settings, settings
 from runtime.agent import Agent
 from runtime.agent_events import AgentEvent
-from interface.cli.jinni import (
+from interface._jinni import (
     config_text,
     enable_input_history,
     help_text,
