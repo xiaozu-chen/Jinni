@@ -14,3 +14,4 @@ build/
 *.egg-info/
 _ignore_this_script.py
 data/
+scrap.txt
