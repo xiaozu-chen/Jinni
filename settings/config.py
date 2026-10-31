@@ -51,7 +51,7 @@ class Settings:
     subagent_thinking: bool = False
 
     # context management
-    context_limit: int = 16384 # must match the -c of llama-server
+    context_limit: int = 32768 # must match the -c of llama-server
     compact_at: float = 0.7 
     keep_recent: int = 3
     summarize_at: float = 0.8
